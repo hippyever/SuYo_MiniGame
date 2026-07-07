@@ -1,0 +1,13 @@
+{
+  "name": "suzao-minigame-checkin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "溯造 MiniGame 活动网页打卡系统",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

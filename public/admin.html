@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#edf4f1" />
+    <title>溯造 MiniGame 打卡后台</title>
+    <link rel="stylesheet" href="/styles.css?v=20260707g" />
+  </head>
+  <body class="admin-body">
+    <main class="admin-login" id="adminLogin">
+      <section class="login-card">
+        <a class="brand-lockup" href="/" aria-label="溯造 MiniGame 后台">
+          <span class="brand-mark">SZ</span>
+          <span>
+            <span class="brand-name">溯造 MiniGame</span>
+            <span class="brand-caption">专属后台</span>
+          </span>
+        </a>
+        <div class="login-copy">
+          <p class="eyebrow">访问验证</p>
+          <h1>输入后台密码</h1>
+          <p>后台仅允许通过专属域名访问。登录记录会缓存在本机。</p>
+        </div>
+        <form class="login-form" id="adminLoginForm">
+          <label class="field">
+            <span>访问密码</span>
+            <input id="adminPasswordInput" type="password" autocomplete="current-password" placeholder="请输入访问密码" />
+          </label>
+          <button class="checkin-button login-button" type="submit">
+            <span class="button-main">进入后台</span>
+            <span class="button-sub">本机记住登录状态</span>
+          </button>
+          <p class="login-error" id="adminLoginError" role="alert" hidden></p>
+        </form>
+      </section>
+    </main>
+
+    <main class="admin-shell" id="adminApp" hidden>
+      <header class="admin-topbar">
+        <a class="brand-lockup" href="/" aria-label="返回后台首页">
+          <span class="brand-mark">SZ</span>
+          <span>
+            <span class="brand-name">溯造 MiniGame</span>
+            <span class="brand-caption">打卡后台</span>
+          </span>
+        </a>
+        <button class="nav-button" id="adminLogoutButton" type="button">退出</button>
+      </header>
+
+      <section class="admin-heading">
+        <div>
+          <p class="eyebrow">运营台</p>
+          <h1>出勤记录</h1>
+        </div>
+        <p class="admin-note">查看日志、每日首末打卡和出勤时长。</p>
+      </section>
+
+      <section class="toolbar" aria-label="筛选与导出">
+        <label class="field date-field">
+          <span>日期</span>
+          <input id="dateInput" type="date" />
+        </label>
+        <label class="field person-field">
+          <span>人员</span>
+          <select id="personSelect">
+            <option value="">全部人员</option>
+          </select>
+        </label>
+        <button class="tool-button primary" id="refreshButton" type="button">刷新</button>
+        <button class="tool-button" id="exportSummaryButton" type="button">导出汇总</button>
+        <button class="tool-button" id="exportLogsButton" type="button">导出日志</button>
+      </section>
+
+      <section class="stats-grid" aria-label="今日统计">
+        <article class="stat-card">
+          <span>出勤人数</span>
+          <strong id="peopleStat">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>打卡日志</span>
+          <strong id="logsStat">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>设备数</span>
+          <strong id="devicesStat">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>平均出勤</span>
+          <strong id="durationStat">0 分钟</strong>
+        </article>
+      </section>
+
+      <section class="table-section location-section">
+        <div class="section-head">
+          <h2>校区范围复核图</h2>
+          <span class="meta-text" id="mapMeta">等待数据</span>
+        </div>
+        <div class="map-grid">
+          <div class="map-canvas-wrap">
+            <canvas id="locationMap" width="1100" height="420" aria-label="签到位置打点图"></canvas>
+          </div>
+          <div class="map-list" id="mapPointList"></div>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="section-head">
+          <h2>每日最早 / 最晚打卡</h2>
+          <span id="summaryMeta" class="meta-text"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>姓名</th>
+                <th>队伍</th>
+                <th>最早</th>
+                <th>最晚</th>
+                <th>今日出勤</th>
+                <th>次数</th>
+                <th>设备</th>
+                <th>提示</th>
+              </tr>
+            </thead>
+            <tbody id="summaryBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="section-head">
+          <h2>原始上传日志</h2>
+          <span class="meta-text">当前筛选最多 5000 条</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>姓名</th>
+                <th>队伍</th>
+                <th>设备尾号</th>
+                <th>定位</th>
+                <th>IP</th>
+                <th>风险</th>
+              </tr>
+            </thead>
+            <tbody id="logsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/admin.js?v=20260707h" defer></script>
+  </body>
+</html>

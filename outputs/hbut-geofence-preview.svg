@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1100" viewBox="0 0 1500 1100" role="img" aria-label="湖北工业大学校内非宿舍打卡范围复核图">
+  <style>
+    * { box-sizing: border-box; }
+    svg { background: #f7faf9; font-family: "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; }
+    .title { fill: #16251f; font-size: 30px; font-weight: 700; }
+    .subtitle { fill: #5d6e66; font-size: 15px; }
+    .map-frame, .side-panel { fill: #ffffff; stroke: #d8e3df; stroke-width: 1.2; }
+    .grid-line { stroke: #dfe9e5; stroke-width: 1; }
+    .allowed-area { fill: #cfeedd; stroke: #167351; stroke-width: 3; }
+    .excluded-area { fill: #ef4444; fill-opacity: 0.38; stroke: #b91c1c; stroke-width: 2.4; }
+    .candidate-building { fill: none; stroke: #7f1d1d; stroke-width: 1.2; stroke-opacity: 0.76; }
+    .campus-label { fill: #0f5138; font-size: 22px; font-weight: 700; }
+    .zone-label rect { fill: #ffffff; fill-opacity: 0.88; stroke: #b91c1c; stroke-width: 1; }
+    .zone-label text { fill: #7f1d1d; font-size: 14px; font-weight: 700; }
+    .legend-title { fill: #17241f; font-size: 20px; font-weight: 700; }
+    .legend-text { fill: #34423d; font-size: 15px; }
+    .legend-muted { fill: #66756f; font-size: 13px; }
+    .legend-swatch-allowed { fill: #cfeedd; stroke: #167351; stroke-width: 2; }
+    .legend-swatch-excluded { fill: #ef4444; fill-opacity: 0.38; stroke: #b91c1c; stroke-width: 2; }
+    .legend-swatch-building { fill: none; stroke: #7f1d1d; stroke-width: 2; }
+    .side-row rect { fill: #ef4444; fill-opacity: 0.38; stroke: #b91c1c; }
+    .side-row text { fill: #26342f; font-size: 15px; font-weight: 600; }
+    .note { fill: #4c5c56; font-size: 13px; }
+    .scale-bar line { stroke: #18251f; stroke-width: 2; }
+    .scale-bar text { fill: #18251f; font-size: 13px; font-weight: 700; }
+    .north text { fill: #18251f; font-size: 16px; font-weight: 700; }
+    .north path { fill: #18251f; }
+  </style>
+
+  <text class="title" x="70" y="42">湖北工业大学打卡范围复核图</text>
+  <text class="subtitle" x="70" y="70">绿色为校内可签到区域，红色为宿舍/公寓不可签到排除区；深红细框为 OSM 候选宿舍楼边界框。</text>
+
+  <rect class="map-frame" x="70" y="90" width="1040" height="890" rx="8" />
+  <clipPath id="mapClip">
+    <rect x="70" y="90" width="1040" height="890" rx="8" />
+  </clipPath>
+  <g clip-path="url(#mapClip)">
+    <line class="grid-line" x1="296.01" y1="90" x2="296.01" y2="980" />
+<line class="grid-line" x1="364.05" y1="90" x2="364.05" y2="980" />
+<line class="grid-line" x1="432.09" y1="90" x2="432.09" y2="980" />
+<line class="grid-line" x1="500.12" y1="90" x2="500.12" y2="980" />
+<line class="grid-line" x1="568.16" y1="90" x2="568.16" y2="980" />
+<line class="grid-line" x1="636.20" y1="90" x2="636.20" y2="980" />
+<line class="grid-line" x1="704.24" y1="90" x2="704.24" y2="980" />
+<line class="grid-line" x1="772.28" y1="90" x2="772.28" y2="980" />
+<line class="grid-line" x1="840.31" y1="90" x2="840.31" y2="980" />
+<line class="grid-line" x1="908.35" y1="90" x2="908.35" y2="980" />
+<line class="grid-line" x1="976.39" y1="90" x2="976.39" y2="980" />
+<line class="grid-line" x1="70" y1="120.62" x2="1110" y2="120.62" />
+<line class="grid-line" x1="70" y1="188.65" x2="1110" y2="188.65" />
+<line class="grid-line" x1="70" y1="256.69" x2="1110" y2="256.69" />
+<line class="grid-line" x1="70" y1="324.73" x2="1110" y2="324.73" />
+<line class="grid-line" x1="70" y1="392.77" x2="1110" y2="392.77" />
+<line class="grid-line" x1="70" y1="460.81" x2="1110" y2="460.81" />
+<line class="grid-line" x1="70" y1="528.84" x2="1110" y2="528.84" />
+<line class="grid-line" x1="70" y1="596.88" x2="1110" y2="596.88" />
+<line class="grid-line" x1="70" y1="664.92" x2="1110" y2="664.92" />
+<line class="grid-line" x1="70" y1="732.96" x2="1110" y2="732.96" />
+<line class="grid-line" x1="70" y1="801.00" x2="1110" y2="801.00" />
+<line class="grid-line" x1="70" y1="869.03" x2="1110" y2="869.03" />
+<line class="grid-line" x1="70" y1="937.07" x2="1110" y2="937.07" />
+    <path class="allowed-area" d="M 299.43 365.24 L 332.05 829.86 L 334.21 841.76 L 339.72 844.02 L 545.60 837.07 L 644.70 833.73 L 652.24 942.46 L 653.09 949.38 L 731.28 935.95 L 776.44 924.33 L 875.31 909.73 L 857.86 714.70 L 861.38 665.07 L 875.26 609.20 L 883.99 568.44 L 880.09 542.82 L 816.32 454.39 L 779.65 417.54 L 758.64 389.73 L 756.54 375.12 L 760.04 362.61 L 826.57 290.99 L 849.68 256.92 L 853.18 227.71 L 851.08 195.73 L 840.58 180.43 L 830.07 167.92 L 782.46 139.40 L 763.55 131.06 L 755.58 120.62 L 744.59 130.28 L 738.65 135.51 L 709.60 147.63 L 626.60 167.06 L 553.98 184.91 L 552.05 238.75 L 489.74 235.65 L 489.69 350.29 L 306.81 352.94 L 299.43 365.24 Z"><title>湖北工业大学主校区</title></path>
+    <path class="excluded-area" d="M 296.01 716.76 L 421.98 716.76 L 421.98 333.20 L 296.01 333.20 L 296.01 716.76 Z"><title>西苑公寓区</title></path>
+<path class="excluded-area" d="M 364.54 461.05 L 462.45 461.05 L 462.45 355.76 L 364.54 355.76 L 364.54 461.05 Z"><title>研究生公寓区</title></path>
+<path class="excluded-area" d="M 478.77 368.54 L 615.83 368.54 L 615.83 203.08 L 478.77 203.08 L 478.77 368.54 Z"><title>北苑公寓区</title></path>
+<path class="excluded-area" d="M 694.16 299.35 L 844.28 299.35 L 844.28 126.37 L 694.16 126.37 L 694.16 299.35 Z"><title>北15/北16/留学生公寓区</title></path>
+<path class="excluded-area" d="M 772.48 923.59 L 883.44 923.59 L 883.44 645.31 L 772.48 645.31 L 772.48 923.59 Z"><title>楚才苑公寓区</title></path>
+    <path class="candidate-building" d="M 346.28 647.30 L 396.00 647.30 L 396.00 630.62 L 346.28 630.62 L 346.28 647.30 Z"><title>西苑公寓3号</title></path>
+<path class="candidate-building" d="M 347.03 678.65 L 398.22 678.65 L 398.22 655.13 L 347.03 655.13 L 347.03 678.65 Z"><title>西苑公寓2号</title></path>
+<path class="candidate-building" d="M 350.07 696.87 L 402.13 696.87 L 402.13 676.49 L 350.07 676.49 L 350.07 696.87 Z"><title>西苑公寓1号</title></path>
+<path class="candidate-building" d="M 343.08 622.86 L 393.54 622.86 L 393.54 606.20 L 343.08 606.20 L 343.08 622.86 Z"><title>西苑公寓4号</title></path>
+<path class="candidate-building" d="M 323.96 475.04 L 375.86 475.04 L 375.86 457.03 L 323.96 457.03 L 323.96 475.04 Z"><title>西苑公寓8号</title></path>
+<path class="candidate-building" d="M 326.39 500.07 L 378.28 500.07 L 378.28 482.07 L 326.39 482.07 L 326.39 500.07 Z"><title>西苑公寓7号</title></path>
+<path class="candidate-building" d="M 328.38 524.93 L 380.28 524.93 L 380.28 506.93 L 328.38 506.93 L 328.38 524.93 Z"><title>西苑公寓6号</title></path>
+<path class="candidate-building" d="M 332.03 550.62 L 383.93 550.62 L 383.93 532.62 L 332.03 532.62 L 332.03 550.62 Z"><title>西苑公寓5号</title></path>
+<path class="candidate-building" d="M 318.31 446.15 L 361.20 446.15 L 361.20 431.73 L 318.31 431.73 L 318.31 446.15 Z"><title>西苑公寓9号</title></path>
+<path class="candidate-building" d="M 321.12 420.83 L 371.20 420.83 L 371.20 404.53 L 321.12 404.53 L 321.12 420.83 Z"><title>西苑公寓10号</title></path>
+<path class="candidate-building" d="M 319.28 396.33 L 369.36 396.33 L 369.36 380.04 L 319.28 380.04 L 319.28 396.33 Z"><title>西苑公寓11号</title></path>
+<path class="candidate-building" d="M 317.15 371.12 L 367.23 371.12 L 367.23 354.83 L 317.15 354.83 L 317.15 371.12 Z"><title>西苑公寓12号</title></path>
+<path class="candidate-building" d="M 713.32 202.78 L 759.38 202.78 L 759.38 173.88 L 713.32 173.88 L 713.32 202.78 Z"><title>北16学生宿舍</title></path>
+<path class="candidate-building" d="M 746.69 180.55 L 790.69 180.55 L 790.69 146.10 L 746.69 146.10 L 746.69 180.55 Z"><title>北15学生宿舍</title></path>
+<path class="candidate-building" d="M 500.03 255.92 L 551.67 255.92 L 551.67 241.64 L 500.03 241.64 L 500.03 255.92 Z"><title>北苑公寓14号</title></path>
+<path class="candidate-building" d="M 498.63 280.45 L 549.87 280.45 L 549.87 266.38 L 498.63 266.38 L 498.63 280.45 Z"><title>北苑公寓13号</title></path>
+<path class="candidate-building" d="M 503.19 303.74 L 545.57 303.74 L 545.57 289.84 L 503.19 289.84 L 503.19 303.74 Z"><title>北苑公寓12号</title></path>
+<path class="candidate-building" d="M 501.89 327.37 L 543.25 327.37 L 543.25 314.48 L 501.89 314.48 L 501.89 327.37 Z"><title>北苑公寓11号</title></path>
+<path class="candidate-building" d="M 499.91 349.34 L 542.38 349.34 L 542.38 336.39 L 499.91 336.39 L 499.91 349.34 Z"><title>北苑公寓10号</title></path>
+<path class="candidate-building" d="M 557.49 258.42 L 593.09 258.42 L 593.09 245.00 L 557.49 245.00 L 557.49 258.42 Z"><title>北苑公寓7号</title></path>
+<path class="candidate-building" d="M 555.91 282.31 L 591.50 282.31 L 591.50 268.89 L 555.91 268.89 L 555.91 282.31 Z"><title>北苑公寓6号</title></path>
+<path class="candidate-building" d="M 557.87 236.18 L 593.46 236.18 L 593.46 222.76 L 557.87 222.76 L 557.87 236.18 Z"><title>北苑公寓8号</title></path>
+<path class="candidate-building" d="M 551.38 309.88 L 587.89 309.88 L 587.89 295.03 L 551.38 295.03 L 551.38 309.88 Z"><title>北苑公寓5号</title></path>
+<path class="candidate-building" d="M 791.57 214.40 L 825.09 214.40 L 825.09 204.63 L 791.57 204.63 L 791.57 214.40 Z"><title>留学生公寓1栋</title></path>
+<path class="candidate-building" d="M 790.97 233.06 L 824.50 233.06 L 824.50 223.29 L 790.97 223.29 L 790.97 233.06 Z"><title>留学生公寓2栋</title></path>
+<path class="candidate-building" d="M 789.62 254.31 L 823.14 254.31 L 823.14 244.54 L 789.62 244.54 L 789.62 254.31 Z"><title>留学生公寓3栋</title></path>
+<path class="candidate-building" d="M 788.48 278.78 L 812.41 278.78 L 812.41 268.93 L 788.48 268.93 L 788.48 278.78 Z"><title>留学生公寓4栋</title></path>
+<path class="candidate-building" d="M 833.35 675.55 L 855.45 675.55 L 855.45 664.84 L 833.35 664.84 L 833.35 675.55 Z"><title>楚才苑1号公寓</title></path>
+<path class="candidate-building" d="M 813.93 701.15 L 854.20 701.15 L 854.20 689.36 L 813.93 689.36 L 813.93 701.15 Z"><title>楚才苑2号公寓</title></path>
+<path class="candidate-building" d="M 807.74 724.46 L 852.55 724.46 L 852.55 713.81 L 807.74 713.81 L 807.74 724.46 Z"><title>楚才苑3号公寓</title></path>
+<path class="candidate-building" d="M 804.63 750.33 L 853.70 750.33 L 853.70 739.11 L 804.63 739.11 L 804.63 750.33 Z"><title>楚才苑4号公寓</title></path>
+<path class="candidate-building" d="M 797.74 775.76 L 854.57 775.76 L 854.57 762.86 L 797.74 762.86 L 797.74 775.76 Z"><title>楚才苑5号公寓</title></path>
+<path class="candidate-building" d="M 797.72 845.75 L 860.65 845.75 L 860.65 832.53 L 797.72 832.53 L 797.72 845.75 Z"><title>楚才苑6号公寓</title></path>
+<path class="candidate-building" d="M 795.87 872.90 L 863.87 872.90 L 863.87 860.55 L 795.87 860.55 L 795.87 872.90 Z"><title>楚才苑7号公寓</title></path>
+<path class="candidate-building" d="M 791.47 904.18 L 865.21 904.18 L 865.21 889.02 L 791.47 889.02 L 791.47 904.18 Z"><title>楚才苑8号公寓</title></path>
+<path class="candidate-building" d="M 550.30 331.59 L 585.65 331.59 L 585.65 320.40 L 550.30 320.40 L 550.30 331.59 Z"><title>北苑公寓4号</title></path>
+<path class="candidate-building" d="M 385.29 443.05 L 442.75 443.05 L 442.75 374.24 L 385.29 374.24 L 385.29 443.05 Z"><title>研究生公寓</title></path>
+  </g>
+  <text class="campus-label" x="590" y="132" text-anchor="middle">湖北工业大学主校区</text>
+  <g class="zone-label" transform="translate(359.00 524.98)">
+      <rect x="-68" y="-18" width="136" height="32" rx="5" />
+      <text text-anchor="middle" y="4">西苑公寓区</text>
+    </g>
+<g class="zone-label" transform="translate(413.50 408.40)">
+      <rect x="-68" y="-18" width="136" height="32" rx="5" />
+      <text text-anchor="middle" y="4">研究生公寓区</text>
+    </g>
+<g class="zone-label" transform="translate(547.30 285.81)">
+      <rect x="-68" y="-18" width="136" height="32" rx="5" />
+      <text text-anchor="middle" y="4">北苑公寓区</text>
+    </g>
+<g class="zone-label" transform="translate(769.22 212.86)">
+      <rect x="-68" y="-18" width="136" height="32" rx="5" />
+      <text text-anchor="middle" y="4">北15/北16/留学生公寓区</text>
+    </g>
+<g class="zone-label" transform="translate(827.96 784.45)">
+      <rect x="-68" y="-18" width="136" height="32" rx="5" />
+      <text text-anchor="middle" y="4">楚才苑公寓区</text>
+    </g>
+  
+    <g class="scale-bar">
+      <line x1="104" y1="938" x2="240.08" y2="938" />
+      <line x1="104" y1="930" x2="104" y2="946" />
+      <line x1="240.08" y1="930" x2="240.08" y2="946" />
+      <text x="172.04" y="924" text-anchor="middle">200m</text>
+    </g>
+  <g class="north" transform="translate(1054 132)">
+    <path d="M 0 -24 L 10 12 L 0 7 L -10 12 Z" />
+    <text text-anchor="middle" y="36">北</text>
+  </g>
+
+  <rect class="side-panel" x="1150" y="90" width="290" height="890" rx="8" />
+  <text class="legend-title" x="1172" y="132">图例</text>
+  <rect class="legend-swatch-allowed" x="1172" y="160" width="30" height="20" rx="3" />
+  <text class="legend-text" x="1214" y="176">校内可签到区域</text>
+  <rect class="legend-swatch-excluded" x="1172" y="198" width="30" height="20" rx="3" />
+  <text class="legend-text" x="1214" y="214">不可签到排除区</text>
+  <rect class="legend-swatch-building" x="1172" y="236" width="30" height="20" rx="3" />
+  <text class="legend-text" x="1214" y="252">候选宿舍楼框</text>
+
+  <text class="legend-title" x="1172" y="295">排除区清单</text>
+  
+      <g class="side-row">
+        <rect x="1150" y="300" width="18" height="18" />
+        <text x="1178" y="315">西苑公寓区</text>
+      </g>
+
+      <g class="side-row">
+        <rect x="1150" y="356" width="18" height="18" />
+        <text x="1178" y="371">研究生公寓区</text>
+      </g>
+
+      <g class="side-row">
+        <rect x="1150" y="412" width="18" height="18" />
+        <text x="1178" y="427">北苑公寓区</text>
+      </g>
+
+      <g class="side-row">
+        <rect x="1150" y="468" width="18" height="18" />
+        <text x="1178" y="483">北15/北16/留学生公寓区</text>
+      </g>
+
+      <g class="side-row">
+        <rect x="1150" y="524" width="18" height="18" />
+        <text x="1178" y="539">楚才苑公寓区</text>
+      </g>
+
+  <text class="legend-title" x="1172" y="650">建议判定</text>
+  <text class="legend-text" x="1172" y="680">1. 必须在校园边界内</text>
+  <text class="legend-text" x="1172" y="710">2. 不能落入红色区域</text>
+  <text class="legend-text" x="1172" y="740">3. 靠近边界按精度复核</text>
+  <text class="legend-muted" x="1172" y="780">精度建议：≤50m 通过</text>
+  <text class="legend-muted" x="1172" y="804">50-150m 复核 / 重定位</text>
+  <text class="legend-muted" x="1172" y="828">&gt;150m 拒绝或重新定位</text>
+
+  <text class="note" x="1172" y="895">数据：OpenStreetMap / ODbL</text>
+  <text class="note" x="1172" y="920">坐标系：WGS84，经纬度投影预览</text>
+  <text class="note" x="1172" y="945">生成日期：2026-07-07</text>
+</svg>

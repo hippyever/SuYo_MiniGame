@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#edf4f1" />
+    <title>溯造 MiniGame 活动打卡</title>
+    <link rel="stylesheet" href="/styles.css?v=20260707d" />
+  </head>
+  <body class="app-body">
+    <main class="app-shell">
+      <header class="app-topbar" aria-label="顶部导航">
+        <a class="brand-lockup" href="/" aria-label="溯造 MiniGame 打卡首页">
+          <span class="brand-mark">SZ</span>
+          <span>
+            <span class="brand-name">溯造 MiniGame</span>
+            <span class="brand-caption">现场打卡系统</span>
+          </span>
+        </a>
+      </header>
+
+      <section class="checkin-hero" aria-label="活动打卡">
+        <figure class="pass-media" aria-hidden="true">
+          <img src="/assets/pass-texture.png" alt="" width="1200" height="820" />
+        </figure>
+
+        <section class="checkin-card" aria-label="打卡表单">
+          <div class="card-head">
+            <p class="eyebrow">活动通行证</p>
+            <div class="headline-row">
+              <h1>今日打卡</h1>
+              <div class="time-badge">
+                <span id="clockText">--:--</span>
+                <small>北京时间</small>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-grid">
+            <label class="field">
+              <span>姓名</span>
+              <input id="nameInput" autocomplete="name" maxlength="40" placeholder="请输入姓名" />
+            </label>
+            <label class="field">
+              <span>队伍</span>
+              <input id="teamInput" autocomplete="organization" maxlength="40" placeholder="请输入队伍" />
+            </label>
+          </div>
+
+          <div class="device-strip" aria-live="polite">
+            <span class="device-label">设备</span>
+            <span id="deviceText">设备码生成中</span>
+          </div>
+
+          <button class="checkin-button" id="checkinButton" type="button">
+            <span class="button-main" id="buttonLabel">立即打卡</span>
+            <span class="button-sub" id="buttonHint">记录位置与时间</span>
+          </button>
+
+          <div class="status-card" id="statusCard" role="status" aria-live="polite">
+            <div class="status-title">等待打卡</div>
+            <div class="status-text">请填写姓名和队伍。</div>
+          </div>
+        </section>
+      </section>
+
+      <section class="recent-panel" aria-label="本机记录">
+        <div class="section-head">
+          <h2>本机记录</h2>
+          <button class="ghost-button" id="clearLocalButton" type="button">清空缓存</button>
+        </div>
+        <div class="recent-list" id="recentList"></div>
+      </section>
+    </main>
+
+    <script src="/app.js?v=20260707d" defer></script>
+  </body>
+</html>

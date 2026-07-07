@@ -1,0 +1,644 @@
+{
+  "schemaVersion": 1,
+  "id": "hbut-main-campus-no-dormitory",
+  "name": "湖北工业大学校内非宿舍打卡范围",
+  "description": "允许湖北工业大学主校区内打卡，但排除公开地图中识别到的宿舍、公寓生活区。用于后续服务端地理围栏检测。",
+  "coordinateSystem": "WGS84",
+  "geometryFormat": "GeoJSON-like lon-lat coordinate arrays",
+  "generatedAt": "2026-07-07",
+  "decisionOrder": [
+    "location must be inside one allowedArea polygon",
+    "location must not be inside any excludedArea polygon",
+    "if location accuracy radius overlaps an excludedArea or campus boundary, mark for review or require a better fix"
+  ],
+  "recommendedAccuracyPolicy": {
+    "acceptWhenAccuracyMetersAtMost": 50,
+    "reviewWhenAccuracyMetersAtMost": 150,
+    "rejectWhenAccuracyMetersOver": 150,
+    "note": "当前浏览器定位日志约 99m，直接用逐栋宿舍楼会误判；建议用区域级排除区，并结合 accuracy 做边界缓冲判断。"
+  },
+  "sources": [
+    {
+      "name": "OpenStreetMap Nominatim",
+      "url": "https://nominatim.openstreetmap.org/search?q=%E6%B9%96%E5%8C%97%E5%B7%A5%E4%B8%9A%E5%A4%A7%E5%AD%A6&format=json&polygon_geojson=1&addressdetails=1",
+      "license": "OpenStreetMap contributors, ODbL 1.0",
+      "usedFor": "campus boundary polygon",
+      "osmType": "relation",
+      "osmId": 5350481,
+      "retrievedAt": "2026-07-07"
+    },
+    {
+      "name": "OpenStreetMap Overpass API",
+      "url": "https://overpass-api.de/api/interpreter",
+      "license": "OpenStreetMap contributors, ODbL 1.0",
+      "usedFor": "dormitory/apartment candidate buildings inside campus relation 5350481",
+      "retrievedAt": "2026-07-07"
+    }
+  ],
+  "allowedAreas": [
+    {
+      "id": "hbut-main-campus-osm-relation-5350481",
+      "name": "湖北工业大学主校区",
+      "type": "Polygon",
+      "source": {
+        "osmType": "relation",
+        "osmId": 5350481
+      },
+      "coordinates": [
+        [
+          [114.2989024, 30.4855239],
+          [114.2994022, 30.4793462],
+          [114.2994352, 30.479188],
+          [114.2995196, 30.4791579],
+          [114.302674, 30.4792503],
+          [114.3041923, 30.4792948],
+          [114.3043077, 30.4778491],
+          [114.3043208, 30.477757],
+          [114.3055188, 30.4779356],
+          [114.3062107, 30.4780901],
+          [114.3077254, 30.4782843],
+          [114.3074581, 30.4808774],
+          [114.307512, 30.4815373],
+          [114.3077246, 30.4822801],
+          [114.3078584, 30.4828221],
+          [114.3077986, 30.4831628],
+          [114.3068216, 30.4843386],
+          [114.3062598, 30.4848285],
+          [114.305938, 30.4851983],
+          [114.3059058, 30.4853925],
+          [114.3059594, 30.4855589],
+          [114.3069787, 30.4865112],
+          [114.3073327, 30.4869642],
+          [114.3073864, 30.4873525],
+          [114.3073542, 30.4877778],
+          [114.3071933, 30.4879812],
+          [114.3070323, 30.4881476],
+          [114.3063028, 30.4885267],
+          [114.3060131, 30.4886376],
+          [114.305891, 30.4887765],
+          [114.3057226, 30.488648],
+          [114.3056316, 30.4885785],
+          [114.3051866, 30.4884173],
+          [114.303915, 30.488159],
+          [114.3028023, 30.4879217],
+          [114.3027728, 30.4872058],
+          [114.3018181, 30.487247],
+          [114.3018173, 30.4857227],
+          [114.2990154, 30.4856875],
+          [114.2989024, 30.4855239]
+        ]
+      ]
+    }
+  ],
+  "excludedAreas": [
+    {
+      "id": "hbut-west-dormitory-zone",
+      "name": "西苑公寓区",
+      "reason": "dormitory_zone",
+      "type": "Polygon",
+      "sourceOsmWayIds": [
+        156283029,
+        156283031,
+        156283034,
+        156283037,
+        417832654,
+        417832658,
+        417832662,
+        417832666,
+        417832669,
+        417832672,
+        417832681,
+        417832685
+      ],
+      "coordinates": [
+        [
+          [114.29885, 30.48085],
+          [114.30078, 30.48085],
+          [114.30078, 30.48595],
+          [114.29885, 30.48595],
+          [114.29885, 30.48085]
+        ]
+      ]
+    },
+    {
+      "id": "hbut-graduate-apartment-zone",
+      "name": "研究生公寓区",
+      "reason": "dormitory_zone",
+      "type": "Polygon",
+      "sourceOsmWayIds": [
+        1381911312
+      ],
+      "coordinates": [
+        [
+          [114.2999, 30.48425],
+          [114.3014, 30.48425],
+          [114.3014, 30.48565],
+          [114.2999, 30.48565],
+          [114.2999, 30.48425]
+        ]
+      ]
+    },
+    {
+      "id": "hbut-north-dormitory-zone",
+      "name": "北苑公寓区",
+      "reason": "dormitory_zone",
+      "type": "Polygon",
+      "sourceOsmWayIds": [
+        417851094,
+        417851095,
+        417851096,
+        417851098,
+        417851099,
+        417851101,
+        417851102,
+        417851104,
+        417851106,
+        915923666
+      ],
+      "coordinates": [
+        [
+          [114.30165, 30.48548],
+          [114.30375, 30.48548],
+          [114.30375, 30.48768],
+          [114.30165, 30.48768],
+          [114.30165, 30.48548]
+        ]
+      ]
+    },
+    {
+      "id": "hbut-north-international-student-dormitory-zone",
+      "name": "北15/北16/留学生公寓区",
+      "reason": "dormitory_zone",
+      "type": "Polygon",
+      "sourceOsmWayIds": [
+        417851081,
+        417851082,
+        417851153,
+        417851154,
+        417851155,
+        417851158
+      ],
+      "coordinates": [
+        [
+          [114.30495, 30.4864],
+          [114.30725, 30.4864],
+          [114.30725, 30.4887],
+          [114.30495, 30.4887],
+          [114.30495, 30.4864]
+        ]
+      ]
+    },
+    {
+      "id": "hbut-chucai-dormitory-zone",
+      "name": "楚才苑公寓区",
+      "reason": "dormitory_zone",
+      "type": "Polygon",
+      "sourceOsmWayIds": [
+        475046208,
+        475046209,
+        475046210,
+        475046211,
+        475046212,
+        475046214,
+        475046215,
+        475046217
+      ],
+      "coordinates": [
+        [
+          [114.30615, 30.4781],
+          [114.30785, 30.4781],
+          [114.30785, 30.4818],
+          [114.30615, 30.4818],
+          [114.30615, 30.4781]
+        ]
+      ]
+    }
+  ],
+  "candidateExcludedBuildings": [
+    {
+      "osmWayId": 156283029,
+      "name": "西苑公寓3号",
+      "building": "yes",
+      "bounds": {
+        "minLat": 30.4817736,
+        "minLon": 114.2996202,
+        "maxLat": 30.4819953,
+        "maxLon": 114.300382
+      }
+    },
+    {
+      "osmWayId": 156283031,
+      "name": "西苑公寓2号",
+      "building": "yes",
+      "bounds": {
+        "minLat": 30.4813568,
+        "minLon": 114.2996316,
+        "maxLat": 30.4816695,
+        "maxLon": 114.300416
+      }
+    },
+    {
+      "osmWayId": 156283034,
+      "name": "西苑公寓1号",
+      "building": "yes",
+      "bounds": {
+        "minLat": 30.4811145,
+        "minLon": 114.2996782,
+        "maxLat": 30.4813855,
+        "maxLon": 114.3004758
+      }
+    },
+    {
+      "osmWayId": 156283037,
+      "name": "西苑公寓4号",
+      "building": "yes",
+      "bounds": {
+        "minLat": 30.4820986,
+        "minLon": 114.2995712,
+        "maxLat": 30.48232,
+        "maxLon": 114.3003442
+      }
+    },
+    {
+      "osmWayId": 417832654,
+      "name": "西苑公寓8号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.484064,
+        "minLon": 114.2992782,
+        "maxLat": 30.4843034,
+        "maxLon": 114.3000734
+      }
+    },
+    {
+      "osmWayId": 417832658,
+      "name": "西苑公寓7号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4837312,
+        "minLon": 114.2993154,
+        "maxLat": 30.4839705,
+        "maxLon": 114.3001105
+      }
+    },
+    {
+      "osmWayId": 417832662,
+      "name": "西苑公寓6号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4834007,
+        "minLon": 114.299346,
+        "maxLat": 30.48364,
+        "maxLon": 114.3001411
+      }
+    },
+    {
+      "osmWayId": 417832666,
+      "name": "西苑公寓5号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4830591,
+        "minLon": 114.2994019,
+        "maxLat": 30.4832984,
+        "maxLon": 114.300197
+      }
+    },
+    {
+      "osmWayId": 417832669,
+      "name": "西苑公寓9号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4844481,
+        "minLon": 114.2991916,
+        "maxLat": 30.4846399,
+        "maxLon": 114.2998487
+      }
+    },
+    {
+      "osmWayId": 417832672,
+      "name": "西苑公寓10号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4847848,
+        "minLon": 114.2992347,
+        "maxLat": 30.4850015,
+        "maxLon": 114.300002
+      }
+    },
+    {
+      "osmWayId": 417832681,
+      "name": "西苑公寓11号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4851105,
+        "minLon": 114.2992065,
+        "maxLat": 30.4853271,
+        "maxLon": 114.2999738
+      }
+    },
+    {
+      "osmWayId": 417832685,
+      "name": "西苑公寓12号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4854457,
+        "minLon": 114.2991739,
+        "maxLat": 30.4856623,
+        "maxLon": 114.2999412
+      }
+    },
+    {
+      "osmWayId": 417851081,
+      "name": "北16学生宿舍",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4876841,
+        "minLon": 114.3052436,
+        "maxLat": 30.4880683,
+        "maxLon": 114.3059492
+      }
+    },
+    {
+      "osmWayId": 417851082,
+      "name": "北15学生宿舍",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4879796,
+        "minLon": 114.3057549,
+        "maxLat": 30.4884377,
+        "maxLon": 114.306429
+      }
+    },
+    {
+      "osmWayId": 417851094,
+      "name": "北苑公寓14号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4869775,
+        "minLon": 114.3019758,
+        "maxLat": 30.4871674,
+        "maxLon": 114.302767
+      }
+    },
+    {
+      "osmWayId": 417851095,
+      "name": "北苑公寓13号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4866513,
+        "minLon": 114.3019543,
+        "maxLat": 30.4868384,
+        "maxLon": 114.3027393
+      }
+    },
+    {
+      "osmWayId": 417851096,
+      "name": "北苑公寓12号",
+      "building": "dormitory",
+      "bounds": {
+        "minLat": 30.4863417,
+        "minLon": 114.3020242,
+        "maxLat": 30.4865264,
+        "maxLon": 114.3026735
+      }
+    },
+    {
+      "osmWayId": 417851098,
+      "name": "北苑公寓11号",
+      "building": "dormitory",
+      "bounds": {
+        "minLat": 30.4860275,
+        "minLon": 114.3020042,
+        "maxLat": 30.4861988,
+        "maxLon": 114.3026379
+      }
+    },
+    {
+      "osmWayId": 417851099,
+      "name": "北苑公寓10号",
+      "building": "dormitory",
+      "bounds": {
+        "minLat": 30.4857354,
+        "minLon": 114.3019739,
+        "maxLat": 30.4859075,
+        "maxLon": 114.3026246
+      }
+    },
+    {
+      "osmWayId": 417851101,
+      "name": "北苑公寓7号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4869442,
+        "minLon": 114.3028561,
+        "maxLat": 30.4871227,
+        "maxLon": 114.3034015
+      }
+    },
+    {
+      "osmWayId": 417851102,
+      "name": "北苑公寓6号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4866266,
+        "minLon": 114.3028319,
+        "maxLat": 30.486805,
+        "maxLon": 114.3033772
+      }
+    },
+    {
+      "osmWayId": 417851104,
+      "name": "北苑公寓8号",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.48724,
+        "minLon": 114.3028619,
+        "maxLat": 30.4874184,
+        "maxLon": 114.3034072
+      }
+    },
+    {
+      "osmWayId": 417851106,
+      "name": "北苑公寓5号",
+      "building": "dormitory",
+      "bounds": {
+        "minLat": 30.48626,
+        "minLon": 114.3027625,
+        "maxLat": 30.4864575,
+        "maxLon": 114.3033219
+      }
+    },
+    {
+      "osmWayId": 417851153,
+      "name": "留学生公寓1栋",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4875296,
+        "minLon": 114.3064424,
+        "maxLat": 30.4876594,
+        "maxLon": 114.306956
+      }
+    },
+    {
+      "osmWayId": 417851154,
+      "name": "留学生公寓2栋",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4872814,
+        "minLon": 114.3064333,
+        "maxLat": 30.4874113,
+        "maxLon": 114.306947
+      }
+    },
+    {
+      "osmWayId": 417851155,
+      "name": "留学生公寓3栋",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4869989,
+        "minLon": 114.3064125,
+        "maxLat": 30.4871288,
+        "maxLon": 114.3069261
+      }
+    },
+    {
+      "osmWayId": 417851158,
+      "name": "留学生公寓4栋",
+      "building": "house",
+      "bounds": {
+        "minLat": 30.4866735,
+        "minLon": 114.3063951,
+        "maxLat": 30.4868045,
+        "maxLon": 114.3067617
+      }
+    },
+    {
+      "osmWayId": 475046208,
+      "name": "楚才苑1号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.481398,
+        "minLon": 114.3070825,
+        "maxLat": 30.4815403,
+        "maxLon": 114.3074212
+      }
+    },
+    {
+      "osmWayId": 475046209,
+      "name": "楚才苑2号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.4810576,
+        "minLon": 114.306785,
+        "maxLat": 30.4812143,
+        "maxLon": 114.307402
+      }
+    },
+    {
+      "osmWayId": 475046210,
+      "name": "楚才苑3号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.4807476,
+        "minLon": 114.3066902,
+        "maxLat": 30.4808892,
+        "maxLon": 114.3073767
+      }
+    },
+    {
+      "osmWayId": 475046211,
+      "name": "楚才苑4号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.4804037,
+        "minLon": 114.3066426,
+        "maxLat": 30.4805528,
+        "maxLon": 114.3073943
+      }
+    },
+    {
+      "osmWayId": 475046212,
+      "name": "楚才苑5号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.4800656,
+        "minLon": 114.306537,
+        "maxLat": 30.4802371,
+        "maxLon": 114.3074076
+      }
+    },
+    {
+      "osmWayId": 475046214,
+      "name": "楚才苑6号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.4791349,
+        "minLon": 114.3065366,
+        "maxLat": 30.4793107,
+        "maxLon": 114.3075008
+      }
+    },
+    {
+      "osmWayId": 475046215,
+      "name": "楚才苑7号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.478774,
+        "minLon": 114.3065083,
+        "maxLat": 30.4789382,
+        "maxLon": 114.3075501
+      }
+    },
+    {
+      "osmWayId": 475046217,
+      "name": "楚才苑8号公寓",
+      "building": "apartments",
+      "bounds": {
+        "minLat": 30.478358,
+        "minLon": 114.3064409,
+        "maxLat": 30.4785596,
+        "maxLon": 114.3075707
+      }
+    },
+    {
+      "osmWayId": 915923666,
+      "name": "北苑公寓4号",
+      "building": "dormitory",
+      "bounds": {
+        "minLat": 30.4859714,
+        "minLon": 114.302746,
+        "maxLat": 30.4861201,
+        "maxLon": 114.3032876
+      }
+    },
+    {
+      "osmWayId": 1381911312,
+      "name": "研究生公寓",
+      "building": "yes",
+      "bounds": {
+        "minLat": 30.4844893,
+        "minLon": 114.3002179,
+        "maxLat": 30.4854042,
+        "maxLon": 114.3010982
+      }
+    }
+  ],
+  "knownFalsePositiveCandidates": [
+    {
+      "osmWayId": 417851159,
+      "name": "大学生活动中心",
+      "reason": "name matched student keyword but is not a dormitory; not excluded"
+    },
+    {
+      "osmWayId": 417851147,
+      "name": "北苑食堂",
+      "reason": "name matched residential zone keyword but is not a dormitory; not excluded"
+    }
+  ],
+  "integrationNotes": [
+    "先判断点是否在 allowedAreas 内，再判断是否落入 excludedAreas。",
+    "如果使用高德、腾讯、百度地图 SDK，注意其坐标可能不是 WGS84；检测前要统一坐标系。",
+    "手机定位 accuracy 是一个半径，不是绝对点；靠近校园边界或宿舍排除区边界时，应根据 accuracy 要求重新定位或人工复核。",
+    "OSM 数据可能缺楼或楼名过期，正式活动前建议用现场实测点校准 excludedAreas。"
+  ]
+}

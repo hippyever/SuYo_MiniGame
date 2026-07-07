@@ -1,0 +1,3 @@
+data/checkins.json
+data/*.tmp
+*.log
