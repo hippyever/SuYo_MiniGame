@@ -70,3 +70,9 @@ data/checkins.json
 ```
 
 这个文件就是后台统计和导出的来源。正式活动前如需清空演练数据，可以停服后备份并删除该文件，再重新启动服务。
+
+## 阿里云 Ubuntu 24.04 部署
+
+部署到阿里云轻量服务器请看：
+
+[docs/deploy-aliyun-ubuntu-24.04.md](docs/deploy-aliyun-ubuntu-24.04.md)

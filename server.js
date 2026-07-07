@@ -10,12 +10,14 @@ const STORE_FILE = path.resolve(process.env.CHECKIN_DATA_FILE || path.join(ROOT,
 const GEOFENCE_FILE = path.resolve(process.env.CHECKIN_GEOFENCE_FILE || path.join(ROOT, "data", "geofence-hbut.json"));
 const DATA_DIR = path.dirname(STORE_FILE);
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 const TZ = process.env.CHECKIN_TZ || "Asia/Shanghai";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || process.env.ADMIN_TOKEN || "114514";
 const ADMIN_HOSTS = (process.env.ADMIN_HOSTS || process.env.ADMIN_HOST || `admin.localhost:${PORT}`)
   .split(",")
   .map(normalizeHost)
   .filter(Boolean);
+const ADMIN_ROOT_ON_ADMIN_HOST = process.env.ADMIN_ROOT_ON_ADMIN_HOST !== "false";
 const CHECKIN_COOLDOWN_MS = Number(process.env.CHECKIN_COOLDOWN_MS || 15000);
 const METERS_PER_DEGREE_LAT = 110540;
 let geofenceCache = null;
@@ -792,7 +794,7 @@ async function handleExportSummary(req, res, url) {
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   const adminHost = isAdminHost(req);
-  if (pathname === "/") pathname = adminHost ? "/admin.html" : "/index.html";
+  if (pathname === "/") pathname = adminHost && ADMIN_ROOT_ON_ADMIN_HOST ? "/admin.html" : "/index.html";
   if (pathname === "/admin" || pathname === "/admin.html") {
     if (!adminHost) {
       return json(res, 404, {
@@ -884,8 +886,8 @@ async function router(req, res) {
 
 ensureStore()
   .then(() => {
-    http.createServer(router).listen(PORT, "0.0.0.0", () => {
-      console.log(`溯造 MiniGame 打卡系统已启动：http://localhost:${PORT}`);
+    http.createServer(router).listen(PORT, HOST, () => {
+      console.log(`溯造 MiniGame 打卡系统已启动：http://${HOST}:${PORT}`);
       console.log(`后台专属域名：http://${ADMIN_HOSTS[0] || `admin.localhost:${PORT}`}/`);
     });
   })

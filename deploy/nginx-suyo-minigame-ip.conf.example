@@ -1,0 +1,27 @@
+# IP-only deployment for Aliyun.
+# Replace YOUR_SERVER_IP with your public IP.
+#
+# Frontend:
+#   http://YOUR_SERVER_IP/
+# Admin:
+#   http://YOUR_SERVER_IP/admin
+#
+# Browser location on mobile may be limited over plain HTTP.
+# For reliable geolocation, use a domain with HTTPS later.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name YOUR_SERVER_IP _;
+
+    client_max_body_size 2m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
