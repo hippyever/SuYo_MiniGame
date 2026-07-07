@@ -90,8 +90,24 @@ function updateClock() {
   });
 }
 
+function isPotentiallyTrustworthyLocalhost() {
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
+function isGeolocationSecureContext() {
+  return window.isSecureContext || isPotentiallyTrustworthyLocalhost();
+}
+
 function getLocation() {
   return new Promise((resolve, reject) => {
+    if (!isGeolocationSecureContext()) {
+      reject(
+        new Error(
+          "当前是 HTTP/IP 访问，Safari、微信等浏览器不会弹出定位授权。请使用 HTTPS 域名访问后再打卡。"
+        )
+      );
+      return;
+    }
     if (!navigator.geolocation) {
       reject(new Error("当前浏览器不支持定位。"));
       return;
@@ -105,6 +121,14 @@ function getLocation() {
         });
       },
       (error) => {
+        if (!isGeolocationSecureContext()) {
+          reject(
+            new Error(
+              "当前是 HTTP/IP 访问，浏览器已拦截定位能力。请使用 HTTPS 域名访问后再打卡。"
+            )
+          );
+          return;
+        }
         const messages = {
           1: "定位权限被拒绝，请允许浏览器访问位置信息。",
           2: "暂时无法获得定位，请稍后重试。",
