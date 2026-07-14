@@ -103,7 +103,7 @@ function avatarMarkup(creator) {
 function renderTeam() {
   const game = state.game;
   const roster = $("#teamRoster");
-  const owner = creatorById(game.ownerCreatorId) || game.creators?.[0] || { name: state.workspace.identity.name, role: "负责人" };
+  const owner = creatorById(game.ownerCreatorId) || game.creators?.[0] || { name: state.workspace.identity.name, role: "负责人", contribution: "" };
   const ownerCanEdit = game.role === "owner";
   const rows = [{ id: "owner", email: game.ownerEmail, creator: owner, meta: "负责人邮箱已锁定", canEdit: ownerCanEdit, canRemove: false }];
   for (const member of (game.teamMembers || []).filter((item) => item.active)) {
@@ -111,7 +111,7 @@ function renderTeam() {
   }
   roster.innerHTML = rows.map((row) => `<article class="team-row">
     <div class="team-avatar">${avatarMarkup(row.creator)}</div>
-    <div><strong>${escapeHTML(row.creator.name || "未命名")}</strong><span>${escapeHTML(row.creator.role || (row.id === "owner" ? "负责人" : "职能未填写"))}</span></div>
+    <div class="team-member-copy"><strong>${escapeHTML(row.creator.name || "未命名")}</strong><span>${escapeHTML(row.creator.role || (row.id === "owner" ? "负责人" : "职能未填写"))}</span><p class="team-member-contribution${row.creator.contribution ? "" : " is-empty"}">${escapeHTML(row.creator.contribution || "工作简述未填写")}</p></div>
     <code>${escapeHTML(row.email || "负责人邮箱待后台绑定")}<br>${escapeHTML(row.meta)}</code>
     <div class="team-row-actions">${row.canEdit ? `<button type="button" data-edit-member="${escapeHTML(row.id)}">修改资料</button>` : ""}${row.canRemove ? `<button class="danger-text" type="button" data-remove-member="${escapeHTML(row.id)}">移除权限</button>` : ""}</div>
   </article>`).join("");
@@ -132,7 +132,7 @@ function renderSubmission() {
   $("#submitGame").hidden = !owner || game.status === "submitted";
   $("#withdrawGame").hidden = !owner || game.status !== "submitted";
   $("#submissionDescription").textContent = !owner
-    ? "你可以编辑作品内容和自己的成员资料，提交与撤回由负责人完成。"
+    ? "你可以编辑作品内容，以及自己的姓名、职能、头像与工作简述；提交与撤回由负责人完成。"
     : game.status === "submitted"
       ? "作品已经公开。撤回会让所有相关可能性核心自动归还，旧选票不会在重新提交后恢复。"
       : game.status === "withdrawn"
@@ -313,6 +313,8 @@ function openProfile(memberId) {
   form.elements.memberId.value = memberId;
   form.elements.name.value = creator?.name || "";
   form.elements.role.value = creator?.role || "";
+  form.elements.contribution.value = creator?.contribution || "";
+  form.elements.profileAvatar.value = "";
   setMessage($("#profileMessage"), "");
   $("#profileDialog").showModal();
 }

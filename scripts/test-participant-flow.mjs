@@ -108,6 +108,28 @@ assert.equal(game.lateSubmission, false);
 const memberCookie = await login("林潮", "远日点小组", teammateEmail);
 result = await request("/api/participant/workspace", { cookie: memberCookie });
 assert.equal(result.body.game.role, "member");
+
+const contribution = "负责核心玩法程序、关卡交互，以及 Demo 的性能优化。";
+const memberProfile = new FormData();
+memberProfile.set("name", "林潮");
+memberProfile.set("role", "程序");
+memberProfile.set("contribution", contribution);
+result = await request(`/api/participant/games/${game.id}/members/${member.id}`, { cookie: memberCookie, method: "PUT", body: memberProfile });
+assert.equal(result.response.status, 200);
+game = result.body.game;
+assert.equal(game.creators.find((creator) => creator.id === member.creatorId)?.contribution, contribution);
+
+const ownerProfileAttempt = new FormData();
+ownerProfileAttempt.set("name", "无权修改");
+ownerProfileAttempt.set("role", "负责人");
+ownerProfileAttempt.set("contribution", "不应写入");
+result = await request(`/api/participant/games/${game.id}/members/owner`, { cookie: memberCookie, method: "PUT", body: ownerProfileAttempt });
+assert.equal(result.response.status, 403);
+
+result = await request("/api/site");
+const publicGame = result.body.games.find((item) => item.id === game.id);
+assert.equal(publicGame.creators.find((creator) => creator.id === member.creatorId)?.contribution, contribution);
+
 result = await request(`/api/participant/games/${game.id}/withdraw`, { cookie: memberCookie, method: "POST" });
 assert.equal(result.response.status, 403);
 
@@ -173,6 +195,7 @@ result = await request(`/api/participant/games/${game.id}`, {
 assert.equal(result.response.status, 200);
 game = result.body.game;
 assert.equal(game.lateSubmission, true);
+assert.equal(game.creators.find((creator) => creator.id === member.creatorId)?.contribution, contribution);
 
 result = await request(`/api/participant/games/${game.id}/members/${member.id}`, { cookie: ownerCookie, method: "DELETE" });
 assert.equal(result.response.status, 200);

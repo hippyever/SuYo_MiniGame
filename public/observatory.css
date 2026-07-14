@@ -1376,6 +1376,34 @@ canvas:focus-visible {
   min-height: 1.2em;
 }
 
+.creator-caption[data-active="true"] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 12px;
+  border-left: 2px solid var(--signal);
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--signal) 5%, transparent);
+}
+
+.creator-caption strong {
+  color: var(--ink);
+  font-size: .82rem;
+}
+
+.creator-caption span {
+  color: var(--signal);
+  font: 650 .68rem/1.4 var(--font-mono);
+}
+
+.creator-caption small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .detail-actions {
   display: flex;
   flex-wrap: wrap;

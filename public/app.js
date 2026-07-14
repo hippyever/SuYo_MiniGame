@@ -1679,6 +1679,10 @@ function creatorNodes(game) {
   return `<div class="creator-orbit-track">${nodes}</div>`;
 }
 
+function creatorCaptionMarkup(creator) {
+  return `<strong>${escapeHTML(creator.name || "未命名成员")}</strong><span>${escapeHTML(creator.role || "制作人员")}</span><small>${escapeHTML(creator.contribution || "尚未填写具体工作贡献。")}</small>`;
+}
+
 function stopCreatorOrbit() {
   if (state.creatorOrbitFrame) cancelAnimationFrame(state.creatorOrbitFrame);
   state.creatorOrbitFrame = null;
@@ -1938,12 +1942,15 @@ function populateDetail(game) {
 
   const orbit = $("#creatorOrbit");
   orbit.innerHTML = creatorNodes(game);
-  $("#creatorCaption").textContent = game.creators?.length ? "选择头像查看姓名与职责" : "制作人员暂未填写";
+  const creatorCaption = $("#creatorCaption");
+  creatorCaption.dataset.active = "false";
+  creatorCaption.textContent = game.creators?.length ? "选择头像查看姓名、职责与具体贡献" : "制作人员暂未填写";
   $$('[data-creator-index]', orbit).forEach((button) => button.addEventListener("click", () => {
     $$('[data-creator-index]', orbit).forEach((item) => item.setAttribute("aria-pressed", "false"));
     button.setAttribute("aria-pressed", "true");
     const creator = game.creators[Number(button.dataset.creatorIndex)];
-    $("#creatorCaption").textContent = creator.role ? `${creator.name} / ${creator.role}` : creator.name;
+    creatorCaption.dataset.active = "true";
+    creatorCaption.innerHTML = creatorCaptionMarkup(creator);
   }));
   updateDetailVoteButton();
 }

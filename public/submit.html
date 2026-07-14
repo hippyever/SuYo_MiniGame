@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>参赛作品工作台 | 溯造 MiniGame</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/submit.css?v=20260714s" />
+    <link rel="stylesheet" href="/submit.css?v=20260714t" />
   </head>
   <body>
     <div class="submission-sky" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -79,7 +79,7 @@
         </form>
 
         <section class="work-section" id="teamSection">
-          <header><div><span>制作人员</span><h2>轨道成员</h2></div><p>成员邮箱决定编辑权限与自投限制，历史成员永久保留自投限制。</p></header>
+          <header><div><span>制作人员</span><h2>轨道成员</h2></div><p>成员可以维护自己的姓名、职能、头像与工作简述；邮箱决定编辑权限与自投限制。</p></header>
           <div class="team-roster" id="teamRoster"></div>
           <form class="member-invite" id="memberInviteForm">
             <label><span>队友姓名</span><input name="name" maxlength="40" required /></label>
@@ -105,6 +105,7 @@
         <input name="memberId" type="hidden" />
         <label><span>姓名</span><input name="name" maxlength="40" required /></label>
         <label><span>职能</span><input name="role" maxlength="40" /></label>
+        <label><span>工作简述</span><textarea name="contribution" rows="5" maxlength="300" placeholder="例如：负责核心玩法程序、关卡交互与性能优化。"></textarea><small>说明你在本次 Demo 中实际完成的模块、功能或内容，最多 300 字。</small></label>
         <label><span>头像</span><input name="profileAvatar" type="file" accept="image/*" /></label>
         <button class="signal-button primary" type="submit">保存成员资料</button><p class="form-message" id="profileMessage" role="status"></p>
       </form>
@@ -115,6 +116,6 @@
     </dialog>
 
     <div class="submission-toast" id="toast" hidden role="status"></div>
-    <script src="/submit.js?v=20260714s" defer></script>
+    <script src="/submit.js?v=20260714t" defer></script>
   </body>
 </html>

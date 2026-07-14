@@ -11,7 +11,7 @@
     <meta property="og:image" content="/assets/suyo-studio.png" />
     <title>溯造 MiniGame 游戏开发大赛</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/observatory.css?v=20260714s" />
+    <link rel="stylesheet" href="/observatory.css?v=20260714t" />
   </head>
   <body class="observatory-body">
     <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
@@ -179,10 +179,10 @@
         <section class="creator-system" aria-labelledby="creatorTitle">
           <div>
             <h3 id="creatorTitle">制作人员</h3>
-            <p><strong id="detailTeam"></strong>，选择成员头像查看职责</p>
+            <p><strong id="detailTeam"></strong>，选择成员头像查看职责与具体贡献</p>
           </div>
           <div class="creator-orbit" id="creatorOrbit"></div>
-          <p class="creator-caption" id="creatorCaption">作品由真实的人共同完成</p>
+          <div class="creator-caption" id="creatorCaption" aria-live="polite">作品由真实的人共同完成</div>
         </section>
         <div class="detail-actions">
           <button class="primary-action" id="detailVote" type="button">投出一票</button>
@@ -340,6 +340,6 @@
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
     <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
-    <script src="/app.js?v=20260714s" defer></script>
+    <script src="/app.js?v=20260714t" defer></script>
   </body>
 </html>

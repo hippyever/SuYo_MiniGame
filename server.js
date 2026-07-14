@@ -161,6 +161,7 @@ function normalizeCreators(value) {
       id: cleanText(creator?.id, 80) || creatorId(name, role, index),
       name,
       role,
+      contribution: cleanText(creator?.contribution, 300),
       avatarUrl: cleanText(creator?.avatarUrl, 1000),
       order: Number.isFinite(Number(creator?.order)) ? Number(creator.order) : index
     };
@@ -349,7 +350,7 @@ function ensureGameCoordinates(store) {
 
 function createEmptyStore() {
   return {
-    version: 6,
+    version: 7,
     createdAt: new Date().toISOString(),
     games: seedGames(),
     ballots: [],
@@ -379,7 +380,7 @@ function createEmptyStore() {
 function migrateStore(store) {
   const empty = createEmptyStore();
   const defaultDemoById = new Map(empty.games.map((game) => [game.id, game]));
-  store.version = 6;
+  store.version = 7;
   store.games = (Array.isArray(store.games) ? store.games : empty.games).map((game) => {
     const status = gameStatus(game);
     const legacyVideo = cleanAssetUrl(game.videoUrl);
@@ -1407,10 +1408,14 @@ function creatorsFromFields(fields, files, existing = null) {
     const name = cleanText(creator?.name, 40);
     const role = cleanText(creator?.role, 40);
     const old = previous.get(cleanText(creator?.id, 80));
+    const contribution = creator && typeof creator === "object" && Object.hasOwn(creator, "contribution")
+      ? cleanText(creator.contribution, 300)
+      : old?.contribution || "";
     return {
       id: cleanText(creator?.id, 80) || creatorId(name, role, index),
       name,
       role,
+      contribution,
       avatarUrl: files[`avatar-${index}`]?.url || cleanAssetUrl(creator?.avatarUrl) || old?.avatarUrl || "",
       order: index
     };
@@ -1636,7 +1641,7 @@ async function handleParticipantCreateGame(req, res) {
       }
       parsed.fields.team ||= record.session.team;
       const game = gameFromFields(parsed.fields, parsed.files, null, { allowDraft: true, actorEmail: record.session.email });
-      const ownerCreator = { id: randomId(), name: record.session.name, role: "负责人", avatarUrl: "", order: 0 };
+      const ownerCreator = { id: randomId(), name: record.session.name, role: "负责人", contribution: "", avatarUrl: "", order: 0 };
       game.creators = [ownerCreator];
       game.ownerEmail = record.session.email;
       game.ownerCreatorId = ownerCreator.id;
@@ -1866,6 +1871,7 @@ async function handleParticipantAddMember(req, res, id) {
   const email = normalizeEmail(body.email);
   const name = cleanText(body.name, 40);
   const role = cleanText(body.role, 40);
+  const contribution = cleanText(body.contribution, 300);
   if (!isValidEmail(email) || !name) return json(res, 400, { ok: false, error: "MEMBER_REQUIRED", message: "请填写队友姓名和有效邮箱。" });
   const result = await mutateStore((store) => {
     const record = requireParticipantSession(store, req);
@@ -1901,12 +1907,12 @@ async function handleParticipantAddMember(req, res, id) {
     }
     const existingMember = members.find((member) => member.email === email);
     if (existingMember?.active) {
-      const error = new Error("该邮箱已经是当前队友。可在成员资料中修改姓名与职能。");
+      const error = new Error("该邮箱已经是当前队友。可在成员资料中修改姓名、职能与工作简述。");
       error.status = 409;
       error.code = "MEMBER_ALREADY_ACTIVE";
       throw error;
     }
-    const creator = { id: existingMember?.creatorId || randomId(), name, role, avatarUrl: "", order: normalizeCreators(game.creators).length };
+    const creator = { id: existingMember?.creatorId || randomId(), name, role, contribution, avatarUrl: "", order: normalizeCreators(game.creators).length };
     const firstLoginAt = firstEmailVerificationAt(store, email);
     game.creators = [...normalizeCreators(game.creators).filter((item) => item.id !== creator.id), creator];
     if (existingMember) {
@@ -1925,7 +1931,7 @@ async function handleParticipantAddMember(req, res, id) {
       actorEmail: record.session.email,
       gameId: id,
       memberEmail: email,
-      after: { email, name, role, creatorId: creator.id }
+      after: { email, name, role, contribution, creatorId: creator.id }
     });
     return { game, access, ownerName: record.session.name };
   });
@@ -2022,11 +2028,12 @@ async function handleParticipantProfile(req, res, id, memberId) {
       }
       const creators = normalizeCreators(game.creators);
       const index = creators.findIndex((creator) => creator.id === creatorId);
-      const previous = index >= 0 ? creators[index] : { id: creatorId || randomId(), name: record.session.name, role: memberId === "owner" ? "负责人" : "", avatarUrl: "", order: creators.length };
+      const previous = index >= 0 ? creators[index] : { id: creatorId || randomId(), name: record.session.name, role: memberId === "owner" ? "负责人" : "", contribution: "", avatarUrl: "", order: creators.length };
       const next = {
         ...previous,
         name: cleanText(parsed.fields.name, 40) || previous.name,
         role: cleanText(parsed.fields.role, 40),
+        contribution: cleanText(parsed.fields.contribution, 300),
         avatarUrl: parsed.files.profileAvatar?.url || previous.avatarUrl
       };
       if (index >= 0) creators[index] = next;
