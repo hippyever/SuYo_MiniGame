@@ -41,6 +41,7 @@ const state = {
   routeArrived: false,
   routeTimer: null,
   targetId: "",
+  selectedTargetId: "",
   targetProximity: { level: "remote", signal: 0 },
   detectorSnapshots: new Map(),
   detectorLabels: new Map(),
@@ -526,7 +527,7 @@ function resetToCore(animate = true) {
   state.overviewIntent = 0;
   state.navigationActive = false;
   state.navigationTargetId = "";
-  setTarget("");
+  clearSelectedTarget();
 }
 
 function overviewDistanceForViewport() {
@@ -544,7 +545,7 @@ function resetView(animate = true) {
   state.overviewIntent = 1;
   state.navigationActive = false;
   state.navigationTargetId = "";
-  setTarget("");
+  clearSelectedTarget();
   updateMapMode();
 }
 
@@ -597,7 +598,10 @@ function dollyCamera(amount, { user = true, persist = true } = {}) {
     state.overviewIntent = 0;
     updateMapMode();
   }
-  const basis = cameraBasis();
+  let base = state.cameraDestination;
+  const selectedGame = state.gameById.get(state.selectedTargetId);
+  const selectedPoint = selectedGame ? worldPoint(selectedGame) : null;
+  const basis = cameraBasis(base);
   if (amount < 0) {
     state.overviewIntent = clamp(state.overviewIntent + Math.abs(amount) / SPACE.overviewTrigger, 0, 1);
     if (state.overviewIntent >= 1) {
@@ -611,8 +615,19 @@ function dollyCamera(amount, { user = true, persist = true } = {}) {
 
   let travel = clamp(amount, -280, 280);
   let travelDirection = basis.forward;
+  if (selectedPoint && travel > 0) {
+    const delta = {
+      x: selectedPoint.x - base.x,
+      y: selectedPoint.y - base.y,
+      z: selectedPoint.z - base.z
+    };
+    const targetDistance = vectorLength(delta);
+    travelDirection = normalizeVector(delta);
+    travel = Math.min(travel, Math.max(0, targetDistance - SPACE.observationDistance));
+    base = { ...base, ...directionAngles(delta) };
+  }
   const distanceFromCore = vectorLength(state.camera);
-  if (distanceFromCore > SPACE.guidanceDistance && travel > 0 && !state.navigationActive) {
+  if (!selectedPoint && distanceFromCore > SPACE.guidanceDistance && travel > 0 && !state.navigationActive) {
     const centerDirection = normalizeVector({ x: -state.camera.x, y: -state.camera.y, z: -state.camera.z });
     const blend = clamp((distanceFromCore - SPACE.guidanceDistance) / 5200, 0.018, 0.075);
     travelDirection = normalizeVector({
@@ -621,12 +636,11 @@ function dollyCamera(amount, { user = true, persist = true } = {}) {
       z: basis.forward.z * (1 - blend) + centerDirection.z * blend
     });
   }
-  const capture = travel > 0 ? nearestCaptureTarget(travelDirection) : null;
+  const capture = !selectedPoint && travel > 0 ? nearestCaptureTarget(travelDirection) : null;
   if (capture && capture.distance < SPACE.sourceDistance + travel + 80) {
     travel = Math.max(0, capture.distance - SPACE.observationDistance);
     setTarget(capture.game.id);
   }
-  const base = state.cameraDestination;
   const next = addScaled(base, travelDirection, travel);
   state.cameraDestination = { ...base, ...next, mode: "free" };
   clampCamera();
@@ -827,7 +841,7 @@ function bindCanvasControls() {
     if (["d", "D"].includes(event.key)) strafeCamera(105, 0);
     if (event.key === "0") resetView(true);
     if (event.key === "Enter" && state.targetId) approachOrOpenTarget();
-    if (event.key === "Escape") setTarget("");
+    if (event.key === "Escape") clearSelectedTarget();
   });
   window.addEventListener("keyup", (event) => stopContinuousDolly(`key:${event.code}`));
   window.addEventListener("blur", stopAllContinuousDolly);
@@ -847,21 +861,55 @@ function selectAt(clientX, clientY) {
   let nearest = null;
   for (const game of state.games) {
     const snapshot = proximitySnapshot(game);
-    if (!snapshot.screen.visible || snapshot.level !== "source") continue;
+    if (!snapshot.screen.visible) continue;
     const distance = Math.hypot(x - snapshot.screen.x, y - snapshot.screen.y);
-    const hitRadius = Math.max(32, planetRadius(game, snapshot.screen) + 14);
+    const hitRadius = Math.max(30, planetRadius(game, snapshot.screen) + 16);
     if (distance <= hitRadius && (!nearest || distance < nearest.distance)) nearest = { game, distance };
   }
   if (!nearest) {
     return;
   }
-  setTarget(nearest.game.id);
-  openDetail(nearest.game.id);
+  if (nearest.game.id === state.selectedTargetId && proximitySnapshot(nearest.game).level === "source") {
+    openDetail(nearest.game.id);
+    return;
+  }
+  selectTarget(nearest.game.id);
+}
+
+function selectTarget(id) {
+  const game = state.gameById.get(id);
+  if (!game) return;
+  state.selectedTargetId = id;
+  state.navigationActive = false;
+  state.navigationTargetId = "";
+  state.overviewIntent = 0;
+  setTarget(id);
+  aimCameraAtTarget(game);
+  updateMapMode();
+  writeLocalState();
+}
+
+function clearSelectedTarget() {
+  state.selectedTargetId = "";
+  setTarget("");
+}
+
+function aimCameraAtTarget(game) {
+  const point = worldPoint(game);
+  const base = state.cameraDestination;
+  const angles = directionAngles({
+    x: point.x - base.x,
+    y: point.y - base.y,
+    z: point.z - base.z
+  });
+  state.cameraDestination = { ...base, ...angles };
+  if (state.reducedMotion) state.camera = { ...state.camera, ...angles };
 }
 
 function navigateToGame(id) {
   const game = state.gameById.get(id);
   if (!game) return;
+  if (state.selectedTargetId && state.selectedTargetId !== id) state.selectedTargetId = "";
   const point = worldPoint(game);
   const inward = normalizeVector(point);
   const destination = addScaled(point, inward, -SPACE.observationDistance);
@@ -1457,7 +1505,9 @@ function updateDetectorState() {
     writeLocalState();
   }
 
-  let targetId = state.navigationTargetId && state.gameById.has(state.navigationTargetId) ? state.navigationTargetId : "";
+  let targetId = state.selectedTargetId && state.gameById.has(state.selectedTargetId)
+    ? state.selectedTargetId
+    : state.navigationTargetId && state.gameById.has(state.navigationTargetId) ? state.navigationTargetId : "";
   if (!targetId) {
     let best = null;
     for (const [id, snapshot] of state.detectorSnapshots) {
@@ -1483,7 +1533,7 @@ function updateDetectorState() {
 }
 
 function applyContentGravity() {
-  if (state.cameraDestination.mode === "overview" || state.navigationActive) return;
+  if (state.cameraDestination.mode === "overview" || state.navigationActive || state.selectedTargetId) return;
   const distance = vectorLength(state.camera);
   if (distance < SPACE.guidanceDistance) return;
   const towardCenter = directionAngles({ x: -state.camera.x, y: -state.camera.y, z: -state.camera.z });
