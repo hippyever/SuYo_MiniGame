@@ -188,14 +188,12 @@ canvas:focus-visible {
   height: 100%;
   object-fit: contain;
   object-position: left center;
-  mix-blend-mode: multiply;
 }
 
 @media (prefers-color-scheme: dark) {
   .brand-button img,
   .poster-brand img {
     filter: invert(1) contrast(1.08);
-    mix-blend-mode: screen;
   }
 }
 

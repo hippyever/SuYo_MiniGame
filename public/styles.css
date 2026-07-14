@@ -224,13 +224,15 @@ select:focus-visible {
   height: 100%;
   object-fit: contain;
   object-position: left center;
-  mix-blend-mode: multiply;
 }
 
 @media (prefers-color-scheme: dark) {
   .brand-lockup img,
   .manifesto-mark img {
     filter: invert(1) contrast(1.05);
+  }
+
+  .manifesto-mark img {
     mix-blend-mode: screen;
   }
 }
