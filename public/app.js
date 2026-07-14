@@ -451,7 +451,7 @@ function resizeCanvas() {
 function createStars() {
   const seed = `${state.site?.settings?.eventSeed || "suyo"}:deep-space`;
   const random = seededRandom(seed);
-  const count = state.performanceTier === "full" ? 620 : state.performanceTier === "standard" ? 380 : 190;
+  const count = state.performanceTier === "full" ? 780 : state.performanceTier === "standard" ? 480 : 210;
   state.stars = Array.from({ length: count }, (_, index) => ({
     direction: (() => {
       const y = random() * 2 - 1;
@@ -459,12 +459,15 @@ function createStars() {
       const angle = random() * Math.PI * 2;
       return { x: Math.cos(angle) * radius, y, z: Math.sin(angle) * radius };
     })(),
-    size: index % 29 === 0 ? 1.8 : 0.42 + random() * 0.9,
-    alpha: 0.24 + random() * 0.58,
-    phase: random() * Math.PI * 2
+    size: index % 31 === 0 ? 1.9 + random() * 0.75 : 0.46 + random() * 1.05,
+    alpha: 0.27 + random() * 0.61,
+    phase: random() * Math.PI * 2,
+    pulse: 0.55 + random() * 0.9,
+    halo: index % 31 === 0,
+    spike: index % 67 === 0
   }));
 
-  const dustCount = state.performanceTier === "full" ? 320 : state.performanceTier === "standard" ? 190 : 80;
+  const dustCount = state.performanceTier === "full" ? 520 : state.performanceTier === "standard" ? 300 : 96;
   state.dust = Array.from({ length: dustCount }, (_, index) => {
     const layer = index % 3;
     const span = 920 + layer * 720;
@@ -474,8 +477,10 @@ function createStars() {
       z: (random() - 0.5) * span,
       span,
       layer,
-      size: 0.55 + random() * (layer === 0 ? 1.2 : 0.7),
-      alpha: 0.12 + random() * 0.34
+      size: 0.62 + random() * (layer === 0 ? 1.45 : 0.86),
+      alpha: 0.14 + random() * 0.38,
+      phase: random() * Math.PI * 2,
+      trail: 0.45 + random() * 0.95
     };
   });
 }
@@ -1140,12 +1145,29 @@ function drawBackground(ctx) {
     const point = addScaled(state.camera, star.direction, 10000);
     const screen = worldToScreen(point);
     if (!screen.visible || screen.x < -4 || screen.y < -4 || screen.x > state.width + 4 || screen.y > state.height + 4) continue;
-    const twinkle = state.reducedMotion || state.lowMode ? 0 : Math.sin(state.frame * 0.014 + star.phase) * 0.08;
-    ctx.globalAlpha = clamp(star.alpha + twinkle + (dark ? 0.04 : -0.05), 0.12, 0.82);
+    const twinkle = state.reducedMotion || state.lowMode ? 0 : Math.sin(state.frame * 0.011 * star.pulse + star.phase) * (star.halo ? 0.15 : 0.09);
+    ctx.globalAlpha = clamp(star.alpha + twinkle + (dark ? 0.06 : -0.04), 0.12, 0.94);
     ctx.fillStyle = state.palette.ink;
-    ctx.fillRect(screen.x, screen.y, star.size, star.size);
+    if (star.halo && !state.lowMode) {
+      ctx.save();
+      ctx.shadowColor = state.palette.ink;
+      ctx.shadowBlur = star.size * 4.5;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, star.size * 0.72, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha *= 0.34;
+      ctx.fillRect(screen.x - star.size * 2.4, screen.y, star.size * 4.8, 0.6);
+      if (star.spike) ctx.fillRect(screen.x, screen.y - star.size * 2.2, 0.6, star.size * 4.4);
+      ctx.restore();
+    } else {
+      ctx.fillRect(screen.x, screen.y, star.size, star.size);
+    }
   }
 
+  const basis = cameraBasis();
+  const motion = state.reducedMotion ? { x: 0, y: 0, z: 0 } : state.cameraVelocity;
+  const motionStrength = clamp(vectorLength(motion) / 9, 0, 1);
   for (const particle of state.dust) {
     const depthScale = 1 + particle.layer * 0.72;
     const point = {
@@ -1156,10 +1178,26 @@ function drawBackground(ctx) {
     const screen = worldToScreen(point);
     if (!screen.visible || screen.x < -5 || screen.y < -5 || screen.x > state.width + 5 || screen.y > state.height + 5) continue;
     const depthFade = clamp(1 - screen.depth / (particle.span * 0.72), 0.08, 1);
-    ctx.globalAlpha = particle.alpha * depthFade;
+    const breathing = state.reducedMotion ? 1 : 0.84 + Math.sin(state.frame * 0.009 + particle.phase) * 0.16;
+    ctx.globalAlpha = particle.alpha * depthFade * breathing;
     ctx.fillStyle = state.palette.ink;
     const size = particle.size * clamp(520 / Math.max(80, screen.depth), 0.45, 2.2);
-    ctx.fillRect(screen.x, screen.y, size, size);
+    if (motionStrength > 0.06 && !state.lowMode) {
+      const focal = Math.min(state.width, state.height) * 0.62;
+      const perspective = focal / Math.max(90, screen.depth);
+      const trailX = clamp(-dot(motion, basis.right) * perspective * particle.trail, -26, 26);
+      const trailY = clamp(dot(motion, basis.up) * perspective * particle.trail, -26, 26);
+      ctx.strokeStyle = state.palette.ink;
+      ctx.lineWidth = Math.max(0.45, size * 0.62);
+      ctx.beginPath();
+      ctx.moveTo(screen.x - trailX * motionStrength, screen.y - trailY * motionStrength);
+      ctx.lineTo(screen.x, screen.y);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, Math.max(0.45, size * 0.56), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -1559,12 +1597,17 @@ function renderFrame(timestamp = performance.now()) {
   updateContinuousDolly(timestamp);
   if (state.ctx && state.width && state.height) {
     applyContentGravity();
+    const previousCamera = { x: state.camera.x, y: state.camera.y, z: state.camera.z };
     const amount = state.reducedMotion ? 1 : state.landing ? 0.14 : state.navigationActive ? 0.026 : 0.12;
     state.camera.x = lerp(state.camera.x, state.cameraDestination.x, amount);
     state.camera.y = lerp(state.camera.y, state.cameraDestination.y, amount);
     state.camera.z = lerp(state.camera.z, state.cameraDestination.z, amount);
     state.camera.yaw = lerpAngle(state.camera.yaw, state.cameraDestination.yaw, amount);
     state.camera.pitch = lerp(state.camera.pitch, state.cameraDestination.pitch, amount);
+    const velocityBlend = state.reducedMotion ? 1 : 0.22;
+    state.cameraVelocity.x = lerp(state.cameraVelocity.x, state.camera.x - previousCamera.x, velocityBlend);
+    state.cameraVelocity.y = lerp(state.cameraVelocity.y, state.camera.y - previousCamera.y, velocityBlend);
+    state.cameraVelocity.z = lerp(state.cameraVelocity.z, state.camera.z - previousCamera.z, velocityBlend);
     if (distance3D(state.camera, state.cameraDestination) < 2.5) state.camera.mode = state.cameraDestination.mode;
     clampCamera({ includeCurrent: false });
 
@@ -2271,14 +2314,55 @@ function applyCorePalette(element, game) {
 
 function setupCeremonyParticles() {
   const root = $("#ceremonyParticles");
-  if (root.childElementCount) return;
-  const count = state.performanceTier === "full" ? 72 : state.performanceTier === "standard" ? 48 : 24;
+  if (root.dataset.tier === state.performanceTier && root.childElementCount) return;
+  root.dataset.tier = state.performanceTier;
+  const count = state.performanceTier === "full" ? 112 : state.performanceTier === "standard" ? 72 : 28;
   root.innerHTML = Array.from({ length: count }, (_, index) => {
     const angle = (index / count) * 360 + (hashNumber(`particle-${index}`) % 17);
-    const radius = 20 + (hashNumber(`radius-${index}`) % 48);
-    const delay = -(hashNumber(`delay-${index}`) % 920);
-    return `<i style="--angle:${angle}deg;--radius:${radius}vmin;--delay:${delay}ms"></i>`;
+    const radius = 18 + (hashNumber(`radius-${index}`) % 54);
+    const delay = -(hashNumber(`delay-${index}`) % 1800);
+    const size = 1.5 + (hashNumber(`size-${index}`) % 34) / 10;
+    const duration = 980 + (hashNumber(`duration-${index}`) % 980);
+    const drift = 12000 + (hashNumber(`drift-${index}`) % 16000);
+    const trail = 5 + (hashNumber(`trail-${index}`) % 19);
+    const alpha = 0.16 + (hashNumber(`alpha-${index}`) % 36) / 100;
+    const releaseDelay = hashNumber(`release-delay-${index}`) % 150;
+    return `<i style="--angle:${angle}deg;--radius:${radius}vmin;--delay:${delay}ms;--release-delay:${releaseDelay}ms;--size:${size}px;--duration:${duration}ms;--drift:${drift}ms;--trail:${trail}px;--particle-alpha:${alpha}"></i>`;
   }).join("");
+}
+
+function pulseCeremonyParticles(className, duration = 1100) {
+  const root = $("#ceremonyParticles");
+  if (!root || state.reducedMotion) return;
+  root.classList.remove(className);
+  void root.offsetWidth;
+  root.classList.add(className);
+  setTimeout(() => root.classList.remove(className), duration);
+}
+
+function emitOrbitEntryBurst(gameId, x, y) {
+  if (state.reducedMotion) return;
+  const system = $("#personalSystem");
+  const game = state.gameById.get(gameId);
+  if (!system || !game) return;
+  const palette = corePalette(game);
+  const burst = document.createElement("div");
+  burst.className = "orbit-entry-burst";
+  burst.setAttribute("aria-hidden", "true");
+  burst.style.left = `${x}px`;
+  burst.style.top = `${y}px`;
+  burst.style.setProperty("--hue", palette.hue);
+  burst.style.setProperty("--hue-2", palette.hue2);
+  const count = state.performanceTier === "full" ? 28 : state.performanceTier === "standard" ? 20 : 12;
+  burst.innerHTML = Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * 360 + (hashNumber(`${gameId}:burst-angle:${index}`) % 21) - 10;
+    const distance = 38 + (hashNumber(`${gameId}:burst-distance:${index}`) % 72);
+    const delay = hashNumber(`${gameId}:burst-delay:${index}`) % 120;
+    const size = 2 + (hashNumber(`${gameId}:burst-size:${index}`) % 32) / 10;
+    return `<i style="--burst-angle:${angle}deg;--burst-distance:${distance}px;--burst-delay:${delay}ms;--burst-size:${size}px"></i>`;
+  }).join("");
+  system.append(burst);
+  setTimeout(() => burst.remove(), 1250);
 }
 
 function ensureRitualAudio() {
@@ -2563,6 +2647,7 @@ async function animateCoreIntoOrbit(gameId) {
   try {
     await state.ritualFlightAnimation.finished;
   } catch {}
+  emitOrbitEntryBurst(gameId, geometry.entryX, geometry.entryY);
   floating.hidden = true;
   target.hidden = true;
   state.ritualFlightAnimation?.cancel?.();
@@ -2762,6 +2847,7 @@ function completeExtraction() {
   stopExtractionTone();
   ritualVibrate(46);
   playRitualTone(122, 0.42, 0.06);
+  pulseCeremonyParticles("core-released", 1150);
   renderPersonalSystem({ floatingId: state.ritualGameId });
   setRitualPhase("floating", {
     title: "可能性核心已脱离",
