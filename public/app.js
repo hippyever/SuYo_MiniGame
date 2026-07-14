@@ -1701,6 +1701,153 @@ function updateDetailVoteButton() {
   button.textContent = "投出一票";
 }
 
+function detailScrollRoot() {
+  const detail = $("#planetDetail");
+  const content = $(".detail-content", detail);
+  const contentOverflow = getComputedStyle(content).overflowY;
+  return ["auto", "scroll"].includes(contentOverflow) ? content : detail;
+}
+
+function updateDetailScrollCue() {
+  const detail = $("#planetDetail");
+  const cue = $("#detailScrollCue");
+  if (!cue) return;
+
+  const scroller = detailScrollRoot();
+  const remaining = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+  const hasHiddenContent = scroller.scrollHeight - scroller.clientHeight > 36;
+  const visible = !detail.hidden
+    && detail.classList.contains("visible")
+    && hasHiddenContent
+    && remaining > 28;
+
+  cue.classList.toggle("visible", visible);
+  cue.disabled = !visible;
+  cue.setAttribute("aria-hidden", String(!visible));
+}
+
+function queueDetailScrollCueUpdate() {
+  cancelAnimationFrame(state.detailScrollCueFrame);
+  state.detailScrollCueFrame = requestAnimationFrame(updateDetailScrollCue);
+}
+
+function installDetailScrollCue() {
+  const detail = $("#planetDetail");
+  const content = $(".detail-content", detail);
+  const cue = document.createElement("button");
+  cue.id = "detailScrollCue";
+  cue.className = "detail-scroll-cue";
+  cue.type = "button";
+  cue.disabled = true;
+  cue.setAttribute("aria-hidden", "true");
+  cue.setAttribute("aria-label", "向下滚动查看剩余作品详情");
+  cue.innerHTML = '<span>下方仍有内容</span><b aria-hidden="true">↓</b>';
+  detail.append(cue);
+
+  const style = document.createElement("style");
+  style.id = "detail-scroll-cue-style";
+  style.textContent = `
+    .detail-scroll-cue {
+      position: fixed;
+      right: clamp(26px, 4vw, 62px);
+      bottom: max(20px, calc(var(--safe-bottom) + 10px));
+      z-index: 4;
+      min-width: 176px;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      border: 1px solid color-mix(in srgb, var(--signal) 58%, var(--line));
+      border-radius: 0;
+      padding: 0 13px 0 16px;
+      color: var(--ink);
+      background: color-mix(in srgb, var(--space) 92%, transparent);
+      box-shadow: inset 3px 0 0 var(--signal), 0 16px 42px rgba(4, 7, 5, 0.32);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      font: 700 0.68rem/1 var(--font-mono);
+      letter-spacing: 0.08em;
+      opacity: 0;
+      transform: translate3d(0, 12px, 0);
+      pointer-events: none;
+      transition: opacity 220ms ease, transform 320ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease;
+    }
+
+    .detail-scroll-cue.visible {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+      pointer-events: auto;
+    }
+
+    .detail-scroll-cue:not(:disabled):hover,
+    .detail-scroll-cue:not(:disabled):focus-visible {
+      border-color: var(--signal);
+    }
+
+    .detail-scroll-cue b {
+      color: var(--signal);
+      font: 700 1rem/1 var(--font-mono);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .detail-scroll-cue.visible b {
+        animation: detail-scroll-cue-depth 1400ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+    }
+
+    @keyframes detail-scroll-cue-depth {
+      0%, 100% { transform: translate3d(0, -2px, 0); opacity: 0.56; }
+      50% { transform: translate3d(0, 3px, 0); opacity: 1; }
+    }
+
+    @media (max-width: 980px) {
+      .detail-scroll-cue {
+        right: 18px;
+        bottom: max(16px, calc(var(--safe-bottom) + 8px));
+        min-width: 164px;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .detail-scroll-cue {
+        right: 12px;
+        min-height: 44px;
+        min-width: 154px;
+        gap: 16px;
+        padding-inline: 14px 12px;
+        font-size: 0.64rem;
+      }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .detail-scroll-cue {
+        background: var(--space);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+    }
+  `;
+  document.head.append(style);
+
+  cue.addEventListener("click", () => {
+    const scroller = detailScrollRoot();
+    scroller.scrollBy({
+      top: Math.max(240, scroller.clientHeight * 0.7),
+      behavior: state.reducedMotion ? "auto" : "smooth"
+    });
+  });
+  detail.addEventListener("scroll", queueDetailScrollCueUpdate, { passive: true });
+  content.addEventListener("scroll", queueDetailScrollCueUpdate, { passive: true });
+  window.visualViewport?.addEventListener("resize", queueDetailScrollCueUpdate, { passive: true });
+  window.addEventListener("orientationchange", queueDetailScrollCueUpdate, { passive: true });
+  if ("ResizeObserver" in window) {
+    const observer = new ResizeObserver(queueDetailScrollCueUpdate);
+    observer.observe(detail);
+    observer.observe(content);
+  }
+}
+
 function populateDetail(game) {
   $("#detailCoordinate").textContent = coordinateLabel(game);
   $("#detailTeam").textContent = game.team;
@@ -1764,6 +1911,8 @@ function openDetail(id) {
   updatePreviewVideo();
   markVisited(id);
   populateDetail(game);
+  $("#planetDetail").scrollTop = 0;
+  $(".detail-content", $("#planetDetail")).scrollTop = 0;
 
   const landing = $("#landingTransition");
   $("#landingImage").src = game.coverUrl || "/assets/pass-texture.png";
@@ -1786,6 +1935,7 @@ function openDetail(id) {
     document.body.classList.add("detail-open");
     $("#detailVideo").play().catch(() => {});
     startCreatorOrbit();
+    requestAnimationFrame(queueDetailScrollCueUpdate);
     landing.classList.remove("entering");
     landing.hidden = true;
     state.landing = false;
@@ -1810,6 +1960,7 @@ function closeDetail() {
   landing.classList.remove("entering");
   landing.classList.add("exiting");
   detail.classList.remove("visible");
+  queueDetailScrollCueUpdate();
   if (state.detailReturnCamera) state.cameraDestination = { ...state.detailReturnCamera };
   clampCamera({ includeCurrent: false });
   clearTimeout(state.landingTimer);
@@ -3423,6 +3574,7 @@ async function loadApplication() {
 }
 
 function init() {
+  installDetailScrollCue();
   bindUI();
   setupCanvas();
   const profile = readProfile();
