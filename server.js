@@ -31,6 +31,8 @@ const MAX_COVER_BYTES = Math.max(1, Number(process.env.MAX_COVER_MB || 12)) * 10
 const MAX_AVATAR_BYTES = Math.max(1, Number(process.env.MAX_AVATAR_MB || 4)) * 1024 * 1024;
 const MAX_VIDEO_BYTES = Math.max(10, Number(process.env.MAX_VIDEO_MB || 300)) * 1024 * 1024;
 const SESSION_TTL_MS = Math.max(1, Number(process.env.SESSION_TTL_DAYS || 30)) * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true"
+  || (process.env.SESSION_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
 const ALLOW_DEV_OTP = process.env.ALLOW_DEV_OTP === "true" || (process.env.ALLOW_DEV_OTP !== "false" && process.env.NODE_ENV !== "production");
 
 const staticTypes = {
@@ -386,7 +388,7 @@ function sessionHash(token) {
 }
 
 function sessionCookie(token, maxAge = Math.floor(SESSION_TTL_MS / 1000)) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = SESSION_COOKIE_SECURE ? "; Secure" : "";
   return `suyo_minigame_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.max(0, maxAge)}${secure}`;
 }
 
