@@ -1,6 +1,14 @@
 # Replace these with your real domains. Caddy gets HTTPS certificates automatically.
 
-checkin.example.com, admin.example.com {
+play.example.com, admin.example.com {
     encode zstd gzip
-    reverse_proxy 127.0.0.1:3000
+    request_body {
+        max_size 320MB
+    }
+    reverse_proxy 127.0.0.1:3000 {
+        transport http {
+            read_timeout 10m
+            write_timeout 10m
+        }
+    }
 }

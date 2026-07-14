@@ -1,5 +1,5 @@
 [Unit]
-Description=SuYo MiniGame check-in service
+Description=SuYo MiniGame player voice service
 After=network-online.target
 Wants=network-online.target
 

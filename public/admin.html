@@ -3,155 +3,152 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#edf4f1" />
-    <title>溯造 MiniGame 打卡后台</title>
-    <link rel="stylesheet" href="/styles.css?v=20260707g" />
+    <meta name="theme-color" content="#e9e9e6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131414" media="(prefers-color-scheme: dark)" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>溯造 MiniGame | 轨道控制台</title>
+    <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
+    <link rel="stylesheet" href="/styles.css?v=20260714g" />
   </head>
   <body class="admin-body">
     <main class="admin-login" id="adminLogin">
-      <section class="login-card">
-        <a class="brand-lockup" href="/" aria-label="溯造 MiniGame 后台">
-          <span class="brand-mark">SZ</span>
-          <span>
-            <span class="brand-name">溯造 MiniGame</span>
-            <span class="brand-caption">专属后台</span>
-          </span>
+      <section class="login-panel">
+        <a class="brand-lockup admin-brand" href="/" aria-label="返回公开星图">
+          <img src="/assets/suyo-studio.png" alt="SuYo Studio 溯游工作室" />
         </a>
-        <div class="login-copy">
-          <p class="eyebrow">访问验证</p>
-          <h1>输入后台密码</h1>
-          <p>后台仅允许通过专属域名访问。登录记录会缓存在本机。</p>
+        <div>
+          <p class="admin-kicker">ORBITAL CONTROL</p>
+          <h1>进入轨道控制台</h1>
+          <p>管理作品、投票时间、违规选票和最终宇宙点亮。</p>
         </div>
-        <form class="login-form" id="adminLoginForm">
-          <label class="field">
-            <span>访问密码</span>
-            <input id="adminPasswordInput" type="password" autocomplete="current-password" placeholder="请输入访问密码" />
-          </label>
-          <button class="checkin-button login-button" type="submit">
-            <span class="button-main">进入后台</span>
-            <span class="button-sub">本机记住登录状态</span>
-          </button>
-          <p class="login-error" id="adminLoginError" role="alert" hidden></p>
+        <form id="adminLoginForm">
+          <label class="admin-field"><span>后台密码</span><input id="adminPasswordInput" type="password" autocomplete="current-password" required /></label>
+          <button class="button button-solid" type="submit">登录后台</button>
+          <p class="form-message" id="adminLoginMessage" role="alert"></p>
         </form>
       </section>
     </main>
 
-    <main class="admin-shell" id="adminApp" hidden>
+    <div class="admin-app" id="adminApp" hidden>
       <header class="admin-topbar">
-        <a class="brand-lockup" href="/" aria-label="返回后台首页">
-          <span class="brand-mark">SZ</span>
-          <span>
-            <span class="brand-name">溯造 MiniGame</span>
-            <span class="brand-caption">打卡后台</span>
-          </span>
+        <a class="brand-lockup admin-brand" href="/" aria-label="打开公开星图">
+          <img src="/assets/suyo-studio.png" alt="SuYo Studio 溯游工作室" />
         </a>
-        <button class="nav-button" id="adminLogoutButton" type="button">退出</button>
+        <nav class="admin-nav" aria-label="后台导航">
+          <a href="#overview">总览</a>
+          <a href="#gamesAdmin">作品</a>
+          <a href="#settingsAdmin">活动</a>
+          <a href="#ballotsAdmin">选票</a>
+          <a href="#resultsAdmin">点亮</a>
+        </nav>
+        <div class="admin-top-actions">
+          <a class="button button-outline" href="/" target="_blank" rel="noreferrer">查看星图</a>
+          <button class="text-action" id="adminLogout" type="button">退出</button>
+        </div>
       </header>
 
-      <section class="admin-heading">
-        <div>
-          <p class="eyebrow">运营台</p>
-          <h1>出勤记录</h1>
-        </div>
-        <p class="admin-note">查看日志、每日首末打卡和出勤时长。</p>
-      </section>
-
-      <section class="toolbar" aria-label="筛选与导出">
-        <label class="field date-field">
-          <span>日期</span>
-          <input id="dateInput" type="date" />
-        </label>
-        <label class="field person-field">
-          <span>人员</span>
-          <select id="personSelect">
-            <option value="">全部人员</option>
-          </select>
-        </label>
-        <button class="tool-button primary" id="refreshButton" type="button">刷新</button>
-        <button class="tool-button" id="exportSummaryButton" type="button">导出汇总</button>
-        <button class="tool-button" id="exportLogsButton" type="button">导出日志</button>
-      </section>
-
-      <section class="stats-grid" aria-label="今日统计">
-        <article class="stat-card">
-          <span>出勤人数</span>
-          <strong id="peopleStat">0</strong>
-        </article>
-        <article class="stat-card">
-          <span>打卡日志</span>
-          <strong id="logsStat">0</strong>
-        </article>
-        <article class="stat-card">
-          <span>设备数</span>
-          <strong id="devicesStat">0</strong>
-        </article>
-        <article class="stat-card">
-          <span>平均出勤</span>
-          <strong id="durationStat">0 分钟</strong>
-        </article>
-      </section>
-
-      <section class="table-section location-section">
-        <div class="section-head">
-          <h2>校区范围复核图</h2>
-          <span class="meta-text" id="mapMeta">等待数据</span>
-        </div>
-        <div class="map-grid">
-          <div class="map-canvas-wrap">
-            <canvas id="locationMap" width="1100" height="420" aria-label="签到位置打点图"></canvas>
+      <main class="admin-main">
+        <section class="admin-overview" id="overview">
+          <div class="admin-section-title">
+            <div><p class="admin-kicker">EVENT OVERVIEW</p><h1 id="adminEventTitle">溯造 MiniGame 游戏开发大赛</h1></div>
+            <div class="event-state" id="adminVotingState">读取中</div>
           </div>
-          <div class="map-list" id="mapPointList"></div>
-        </div>
-      </section>
+          <div class="admin-stats" aria-label="活动统计">
+            <article><span>全部作品</span><strong id="gamesStat">0</strong></article>
+            <article><span>公开作品</span><strong id="publishedStat">0</strong></article>
+            <article><span>投票人数</span><strong id="votersStat">0</strong></article>
+            <article><span>有效票数</span><strong id="votesStat">0</strong></article>
+          </div>
+          <div class="admin-ranking" id="adminRanking"></div>
+        </section>
 
-      <section class="table-section">
-        <div class="section-head">
-          <h2>每日最早 / 最晚打卡</h2>
-          <span id="summaryMeta" class="meta-text"></span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>姓名</th>
-                <th>队伍</th>
-                <th>最早</th>
-                <th>最晚</th>
-                <th>今日出勤</th>
-                <th>次数</th>
-                <th>设备</th>
-                <th>提示</th>
-              </tr>
-            </thead>
-            <tbody id="summaryBody"></tbody>
-          </table>
-        </div>
-      </section>
+        <section class="admin-block" id="gamesAdmin">
+          <div class="admin-block-head">
+            <div><h2>参展作品</h2><p>上传封面、演示视频、创作手记与制作成员。系统会为每款作品生成固定天体坐标。</p></div>
+            <button class="button button-outline" id="resetGameForm" type="button">新建作品</button>
+          </div>
+          <div class="game-admin-layout">
+            <form class="game-editor" id="gameForm">
+              <input type="hidden" id="gameId" name="id" />
+              <input type="hidden" id="creatorsJson" name="creatorsJson" />
+              <div class="editor-title"><strong id="editorTitle">新建作品</strong><span id="editorHint">保存后立即写入服务器</span></div>
+              <div class="admin-field-grid">
+                <label class="admin-field"><span>游戏名称</span><input name="title" maxlength="60" required /></label>
+                <label class="admin-field"><span>制作团队</span><input name="team" maxlength="60" required /></label>
+                <label class="admin-field field-wide"><span>一句话介绍</span><input name="shortDescription" maxlength="120" required /></label>
+                <label class="admin-field field-wide"><span>游戏简介</span><textarea name="description" rows="5" maxlength="1200"></textarea></label>
+                <label class="admin-field field-wide"><span>创作手记</span><textarea name="creationNote" rows="5" maxlength="600" placeholder="记录灵感来源、取舍和这次 48 小时旅程"></textarea></label>
+                <div class="creator-editor field-wide">
+                  <div class="creator-editor-head"><div><strong>制作人员卫星</strong><span>姓名用于自投匹配，修改后需要复核已有选票；最多 12 人</span></div><button class="text-action" id="addCreator" type="button">添加成员</button></div>
+                  <div class="creator-rows" id="creatorRows"></div>
+                </div>
+                <label class="admin-field"><span>标签</span><input name="tags" maxlength="120" placeholder="解谜，叙事，动作" /></label>
+                <label class="admin-field"><span>排序</span><input name="order" type="number" value="100" /></label>
+                <section class="planet-signature field-wide" aria-labelledby="planetSignatureTitle">
+                  <div><strong id="planetSignatureTitle">天体签名</strong><span>坐标对所有访问者固定，形态由作品素材、作品编号与种子共同生成</span></div>
+                  <dl><div><dt>固定坐标</dt><dd id="planetCoordinate">保存作品后生成</dd></div><div><dt>形态种子</dt><dd id="planetSeed">保存作品后生成</dd></div></dl>
+                  <button class="text-action" id="regeneratePlanet" type="button" disabled>重新生成天体</button>
+                </section>
+                <label class="admin-field"><span>下载地址</span><input name="downloadUrl" type="url" placeholder="https://" /></label>
+                <label class="admin-field"><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
+                <label class="admin-field"><span>外部演示地址</span><input name="videoUrl" type="url" placeholder="https://" /></label>
+                <label class="admin-field"><span>本地封面</span><input name="cover" type="file" accept="image/*" /></label>
+                <label class="admin-field field-wide"><span>本地演示视频</span><input name="video" type="file" accept="video/*" /></label>
+              </div>
+              <div class="editor-switches">
+                <label><input name="published" type="checkbox" checked /> 对外发布</label>
+                <label><input name="featured" type="checkbox" /> 设为主推</label>
+              </div>
+              <div class="editor-actions">
+                <button class="button button-solid" id="saveGame" type="submit">保存作品</button>
+                <button class="button button-outline" id="cancelEdit" type="button" hidden>取消编辑</button>
+              </div>
+              <p class="form-message" id="gameMessage" role="status"></p>
+            </form>
+            <div class="admin-game-list" id="adminGameList" aria-live="polite"></div>
+          </div>
+        </section>
 
-      <section class="table-section">
-        <div class="section-head">
-          <h2>原始上传日志</h2>
-          <span class="meta-text">当前筛选最多 5000 条</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>姓名</th>
-                <th>队伍</th>
-                <th>设备尾号</th>
-                <th>定位</th>
-                <th>IP</th>
-                <th>风险</th>
-              </tr>
-            </thead>
-            <tbody id="logsBody"></tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+        <section class="admin-block" id="settingsAdmin">
+          <div class="admin-block-head"><div><h2>活动设置</h2><p>截止后系统只锁定选票并隐藏结果，不会自动公开。</p></div></div>
+          <form class="settings-form" id="settingsForm">
+            <label class="admin-field"><span>活动名称</span><input name="eventTitle" maxlength="80" required /></label>
+            <label class="admin-field"><span>Game Jam 主题</span><input name="theme" maxlength="40" required /></label>
+            <label class="admin-field field-wide"><span>活动标语</span><input name="slogan" maxlength="80" required /></label>
+            <label class="admin-field"><span>投票开始</span><input name="startAt" type="datetime-local" required /></label>
+            <label class="admin-field"><span>投票结束</span><input name="endAt" type="datetime-local" required /></label>
+            <label class="admin-field field-wide"><span>星图种子</span><input name="eventSeed" maxlength="80" placeholder="用于固定所有作品的宇宙坐标" /></label>
+            <div class="settings-notice field-wide"><strong>结果发布规则</strong><span>投票截止后进入锁票态。完成违规票复核与同票裁定后，管理员在“宇宙点亮”区域手动发布。</span></div>
+            <button class="button button-solid" type="submit">保存活动设置</button>
+            <p class="form-message" id="settingsMessage" role="status"></p>
+          </form>
+        </section>
 
-    <script src="/admin.js?v=20260707h" defer></script>
+        <section class="admin-block" id="ballotsAdmin">
+          <div class="admin-block-head">
+            <div><h2>有效选票</h2><p>截止发布前可删除违规投票者。每次删除都必须填写原因并写入审计记录。</p></div>
+            <div class="admin-block-actions">
+              <label class="admin-search"><span>搜索投票者</span><input id="voterSearch" type="search" placeholder="姓名、队伍或邮箱" /></label>
+              <button class="button button-outline" id="exportVotes" type="button">导出选票</button>
+              <button class="button button-outline" id="exportAudit" type="button">导出审计</button>
+            </div>
+          </div>
+          <div class="ballot-list" id="ballotList"></div>
+        </section>
+
+        <section class="admin-block results-control" id="resultsAdmin">
+          <div class="admin-block-head"><div><p class="admin-kicker">COSMIC IGNITION</p><h2>宇宙点亮</h2><p>玩家之声固定为两项同等级奖。前五名构成星座，第五名同票时星座席位自动扩展。</p></div></div>
+          <div id="resultControl"></div>
+        </section>
+
+        <section class="admin-block" id="auditAdmin">
+          <div class="admin-block-head"><div><h2>最近审计记录</h2><p>保存选票修改、管理员复核、裁定与发布行为。</p></div></div>
+          <div class="audit-list" id="auditList"></div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="adminToast" role="status" hidden></div>
+    <script src="/admin.js?v=20260714g" defer></script>
   </body>
 </html>

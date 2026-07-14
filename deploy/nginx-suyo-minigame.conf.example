@@ -1,13 +1,15 @@
-# Replace checkin.example.com and admin.example.com with your real domains.
+# Replace play.example.com and admin.example.com with your real domains.
 # After installing this file, run:
-#   sudo certbot --nginx -d checkin.example.com -d admin.example.com
+#   sudo certbot --nginx -d play.example.com -d admin.example.com
 
 server {
     listen 80;
     listen [::]:80;
-    server_name checkin.example.com admin.example.com;
+    server_name play.example.com admin.example.com;
 
-    client_max_body_size 2m;
+    client_max_body_size 320m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

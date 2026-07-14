@@ -6,15 +6,17 @@
 # Admin:
 #   http://YOUR_SERVER_IP/admin
 #
-# Browser location on mobile may be limited over plain HTTP.
-# For reliable geolocation, use a domain with HTTPS later.
+# Use a domain with HTTPS before public voting so email and identity data
+# are protected in transit.
 
 server {
     listen 80;
     listen [::]:80;
     server_name YOUR_SERVER_IP _;
 
-    client_max_body_size 2m;
+    client_max_body_size 320m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

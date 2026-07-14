@@ -3,76 +3,338 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#edf4f1" />
-    <title>溯造 MiniGame 活动打卡</title>
-    <link rel="stylesheet" href="/styles.css?v=20260707d" />
+    <meta name="theme-color" content="#111310" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#d7d9d4" media="(prefers-color-scheme: light)" />
+    <meta name="description" content="溯造 MiniGame 游戏开发大赛宇宙主题作品观测站与玩家之声投票。" />
+    <meta property="og:title" content="溯造 MiniGame 游戏开发大赛" />
+    <meta property="og:description" content="溯求本源，造物不止。进入共享宇宙，探索每一款 MiniGame Demo。" />
+    <meta property="og:image" content="/assets/suyo-studio.png" />
+    <title>溯造 MiniGame 游戏开发大赛</title>
+    <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
+    <link rel="stylesheet" href="/observatory.css?v=20260714p" />
   </head>
-  <body class="app-body">
-    <main class="app-shell">
-      <header class="app-topbar" aria-label="顶部导航">
-        <a class="brand-lockup" href="/" aria-label="溯造 MiniGame 打卡首页">
-          <span class="brand-mark">SZ</span>
-          <span>
-            <span class="brand-name">溯造 MiniGame</span>
-            <span class="brand-caption">现场打卡系统</span>
-          </span>
-        </a>
+  <body class="observatory-body">
+    <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
+
+    <main class="observer-shell" id="observerShell" aria-hidden="true">
+      <canvas id="spaceCanvas" tabindex="0" aria-label="参展作品三维共享星空。滚轮前后航行，鼠标左键拖动旋转，中键拖动侧移。手机单指旋转，双指航行与侧移。"></canvas>
+      <p class="sr-only" id="offscreenSummary" aria-live="polite"></p>
+
+      <header class="observer-topbar" aria-label="赛事与账户">
+        <button class="brand-button" id="replayPoster" type="button" aria-label="重新查看赛事海报">
+          <img src="/assets/suyo-studio.png" alt="SuYo Studio 溯游工作室" />
+        </button>
+        <div class="event-lockup">
+          <strong id="eventTitle">溯造 MiniGame 游戏开发大赛</strong>
+          <span id="eventTheme">主题：宇宙</span>
+        </div>
+        <div class="observer-status" id="observerStatus" data-state="loading">
+          <span id="statusLabel">正在接收作品数据</span>
+          <time id="deadlineLabel"></time>
+        </div>
+        <div class="account-actions">
+          <button class="plain-action" id="loginButton" type="button">登录</button>
+          <button class="primary-action compact" id="ballotButton" type="button">我的投票 <span id="ballotCount">0/3</span></button>
+        </div>
       </header>
 
-      <section class="checkin-hero" aria-label="活动打卡">
-        <figure class="pass-media" aria-hidden="true">
-          <img src="/assets/pass-texture.png" alt="" width="1200" height="820" />
-        </figure>
-
-        <section class="checkin-card" aria-label="打卡表单">
-          <div class="card-head">
-            <p class="eyebrow">活动通行证</p>
-            <div class="headline-row">
-              <h1>今日打卡</h1>
-              <div class="time-badge">
-                <span id="clockText">--:--</span>
-                <small>北京时间</small>
-              </div>
-            </div>
-          </div>
-
-          <div class="profile-grid">
-            <label class="field">
-              <span>姓名</span>
-              <input id="nameInput" autocomplete="name" maxlength="40" placeholder="请输入姓名" />
-            </label>
-            <label class="field">
-              <span>队伍</span>
-              <input id="teamInput" autocomplete="organization" maxlength="40" placeholder="请输入队伍" />
-            </label>
-          </div>
-
-          <div class="device-strip" aria-live="polite">
-            <span class="device-label">设备</span>
-            <span id="deviceText">设备码生成中</span>
-          </div>
-
-          <button class="checkin-button" id="checkinButton" type="button">
-            <span class="button-main" id="buttonLabel">立即打卡</span>
-            <span class="button-sub" id="buttonHint">记录位置与时间</span>
-          </button>
-
-          <div class="status-card" id="statusCard" role="status" aria-live="polite">
-            <div class="status-title">等待打卡</div>
-            <div class="status-text">请填写姓名和队伍。</div>
-          </div>
-        </section>
+      <section class="map-status" id="mapStatus" aria-live="polite">
+        <span id="mapMode">自由探索</span>
+        <strong><span id="visitedCount">0</span>/<span id="gameCount">0</span> 已查看</strong>
       </section>
 
-      <section class="recent-panel" aria-label="本机记录">
-        <div class="section-head">
-          <h2>本机记录</h2>
-          <button class="ghost-button" id="clearLocalButton" type="button">清空缓存</button>
+      <div class="navigation-hint" id="navigationHint" hidden>左键或单指旋转 <i></i> 滚轮或双指深入 <i></i> 中键或双指侧移</div>
+
+      <section class="target-console" id="targetConsole" hidden aria-live="polite">
+        <div class="target-coordinate">
+          <span id="targetCoordinate">X 0.000 / Y 0.000</span>
+          <b id="targetSignal">信号未锁定</b>
         </div>
-        <div class="recent-list" id="recentList"></div>
+        <div class="target-copy">
+          <p id="targetHint">玩法画面正在显现</p>
+          <strong id="targetUnknown">未知作品</strong>
+        </div>
+        <div class="signal-scale" id="signalScale" aria-label="观测距离">
+          <i></i><i></i><i></i><i></i><i></i>
+          <span id="proximityLabel">远观</span>
+        </div>
+        <button class="primary-action" id="openTarget" type="button">查看游戏</button>
+      </section>
+
+      <section class="route-console" id="routeConsole" hidden aria-live="polite">
+        <div>
+          <span>自动浏览全部作品</span>
+          <strong id="routeProgress">准备中</strong>
+        </div>
+        <button class="plain-action" id="routePause" type="button">暂停</button>
+        <button class="plain-action" id="routeSkip" type="button">下一个</button>
+        <button class="plain-action" id="routeExit" type="button">退出</button>
+      </section>
+
+      <section class="result-console" id="resultConsole" hidden aria-labelledby="resultTitle">
+        <button class="panel-close" id="closeResults" type="button" aria-label="关闭结果面板">关闭</button>
+        <p>玩家之声结果</p>
+        <h2 id="resultTitle">宇宙已经点亮</h2>
+        <div class="winner-list" id="winnerList"></div>
+        <p class="result-summary" id="resultSummary"></p>
+        <button class="secondary-action result-share" id="shareResults" type="button">分享玩家之声结果</button>
+      </section>
+
+      <nav class="observer-toolbar" id="observerToolbar" aria-label="观测工具">
+        <button type="button" id="searchButton">搜索作品</button>
+        <button type="button" id="routeButton">自动浏览全部作品</button>
+        <button type="button" id="resetViewButton">全景观测</button>
+        <button type="button" id="performanceButton" aria-pressed="false">节能模式</button>
+      </nav>
+
+      <div class="zoom-controls" aria-label="前后航行控制">
+        <button id="zoomIn" type="button" aria-label="向前深入星空，长按可连续航行">+</button>
+        <button id="zoomOut" type="button" aria-label="向后退出星空，长按可连续航行">−</button>
+      </div>
+
+      <div class="map-loading" id="mapLoading" role="status">
+        <span></span>
+        <strong>正在建立共享宇宙</strong>
+        <p>读取作品坐标与媒体</p>
+      </div>
+
+      <section class="accessible-index" id="accessibleIndex" aria-label="参展作品无障碍索引">
+        <h2>参展作品</h2>
+        <p>此索引提供与三维星空等价的作品访问能力，作品坐标、详情、登录和投票规则保持不变。</p>
+        <div id="accessibleGameList"></div>
       </section>
     </main>
 
-    <script src="/app.js?v=20260707d" defer></script>
+    <section class="launch-poster" id="launchPoster" aria-labelledby="posterSlogan">
+      <div class="poster-door poster-door-left" aria-hidden="true"></div>
+      <div class="poster-door poster-door-right" aria-hidden="true"></div>
+      <div class="poster-content">
+        <div class="poster-brand">
+          <img src="/assets/suyo-studio.png" alt="SuYo Studio 溯游工作室" />
+        </div>
+        <p class="poster-event" id="posterEvent">溯造 MiniGame 游戏开发大赛</p>
+        <h1 id="posterSlogan"><span>溯求本源，</span><span>造物不止</span></h1>
+        <p class="poster-theme">本届主题 <strong id="posterTheme">宇宙</strong></p>
+        <button class="launch-action" id="launchButton" type="button" disabled>
+          <span id="launchLabel">正在建立观测连接</span>
+          <b aria-hidden="true"></b>
+        </button>
+      </div>
+      <div class="poster-facts" aria-label="赛事信息">
+        <div><span>参展作品</span><strong id="posterGameCount">--</strong></div>
+        <div><span>每人票数</span><strong>最多 3 票</strong></div>
+        <div><span id="posterTimeLabel">投票时间</span><strong id="posterDeadline">读取中</strong></div>
+      </div>
+      <div class="poster-axis" aria-hidden="true"><i></i><i></i><i></i></div>
+    </section>
+
+    <section class="result-ignition" id="resultIgnition" hidden aria-labelledby="ignitionTitle">
+      <div class="ignition-field" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="ignition-copy">
+        <p>玩家之声结果</p>
+        <h2 id="ignitionTitle">宇宙正在点亮</h2>
+        <div class="ignition-winners" id="ignitionWinners"></div>
+        <button class="plain-action inverse" id="enterResultUniverse" type="button">进入最终宇宙</button>
+      </div>
+    </section>
+
+    <div class="landing-transition" id="landingTransition" hidden aria-hidden="true">
+      <div class="landing-planet"><img id="landingImage" src="" alt="" /></div>
+      <div class="landing-reticle"><i></i><i></i></div>
+      <span id="landingStatus">正在穿越行星表面</span>
+    </div>
+
+    <section class="planet-detail" id="planetDetail" hidden role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+      <div class="detail-media-stage">
+        <img id="detailCover" src="" alt="" />
+        <video id="detailVideo" controls muted playsinline preload="metadata" hidden></video>
+        <div class="detail-media-shade" aria-hidden="true"></div>
+      </div>
+      <header class="detail-topbar">
+        <button class="plain-action inverse" id="closeDetail" type="button">返回星图</button>
+        <span id="detailCoordinate"></span>
+        <button class="plain-action inverse" id="shareGame" type="button">分享作品</button>
+      </header>
+      <div class="detail-content">
+        <div class="detail-title-block">
+          <h2 id="detailTitle"></h2>
+          <p id="detailShort"></p>
+        </div>
+        <div class="detail-reading">
+          <section>
+            <h3>游戏简介</h3>
+            <p id="detailDescription"></p>
+          </section>
+          <section id="creationNoteSection">
+            <h3>创作手记</h3>
+            <p id="detailCreationNote"></p>
+          </section>
+          <div class="detail-tags" id="detailTags"></div>
+        </div>
+        <section class="creator-system" aria-labelledby="creatorTitle">
+          <div>
+            <h3 id="creatorTitle">制作人员</h3>
+            <p><strong id="detailTeam"></strong>，选择成员头像查看职责</p>
+          </div>
+          <div class="creator-orbit" id="creatorOrbit"></div>
+          <p class="creator-caption" id="creatorCaption">作品由真实的人共同完成</p>
+        </section>
+        <div class="detail-actions">
+          <button class="primary-action" id="detailVote" type="button">投出一票</button>
+          <a class="secondary-action" id="detailDownload" target="_blank" rel="noreferrer">下载游戏</a>
+          <a class="secondary-action" id="detailVideoLink" target="_blank" rel="noreferrer">打开演示视频</a>
+        </div>
+      </div>
+    </section>
+
+    <div class="site-confirm-layer" id="returnVoteConfirm" hidden>
+      <button class="site-confirm-backdrop" id="cancelReturnVoteBackdrop" type="button" aria-label="取消撤回"></button>
+      <section class="site-confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="returnVoteTitle" aria-describedby="returnVoteDescription">
+        <div class="site-confirm-core" id="returnVoteCore" aria-hidden="true"></div>
+        <div class="site-confirm-copy">
+          <p>轨道操作确认</p>
+          <h2 id="returnVoteTitle">归还可能性核心？</h2>
+          <p id="returnVoteDescription"></p>
+          <strong id="returnVoteGame"></strong>
+        </div>
+        <p class="site-confirm-status" id="returnVoteStatus" role="status" aria-live="polite"></p>
+        <div class="site-confirm-actions">
+          <button class="plain-action" id="cancelReturnVote" type="button">保留这一票</button>
+          <button class="secondary-action" id="confirmReturnVote" type="button">确认归还核心</button>
+        </div>
+      </section>
+    </div>
+
+    <dialog class="station-dialog search-dialog" id="searchDialog">
+      <form method="dialog" class="dialog-frame">
+        <header>
+          <div><span>作品检索</span><h2>搜索作品</h2></div>
+          <button class="plain-action" value="cancel" aria-label="关闭搜索">关闭</button>
+        </header>
+        <label class="field-block">
+          <span>游戏名称、队伍或制作人员</span>
+          <input id="searchInput" type="search" autocomplete="off" />
+        </label>
+        <div class="search-results" id="searchResults" aria-live="polite"></div>
+      </form>
+    </dialog>
+
+    <dialog class="station-dialog auth-dialog" id="authDialog">
+      <form class="dialog-frame" id="authForm" novalidate>
+        <header>
+          <div><span>投票身份</span><h2>登录后继续</h2></div>
+          <button class="plain-action" id="closeAuth" type="button">关闭</button>
+        </header>
+        <p class="dialog-intro">浏览无需登录。投票前使用邮箱验证码确认身份，之后可以随时修改选票。</p>
+        <div class="identity-grid">
+          <label class="field-block"><span>姓名</span><input id="authName" name="name" maxlength="30" autocomplete="name" required /></label>
+          <label class="field-block"><span>队伍</span><input id="authTeam" name="team" maxlength="50" autocomplete="organization" required /></label>
+          <label class="field-block field-wide"><span>邮箱</span><input id="authEmail" name="email" type="email" maxlength="180" autocomplete="email" required /></label>
+          <label class="field-block code-field"><span>6 位验证码</span><input id="authCode" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" /></label>
+          <button class="secondary-action code-action" id="sendCodeButton" type="button">发送验证码</button>
+        </div>
+        <p class="privacy-note">邮箱仅用于本次投票验证，不会公开展示。</p>
+        <button class="primary-action full-action" id="verifyButton" type="submit">验证并登录</button>
+        <p class="form-message" id="authMessage" role="status"></p>
+      </form>
+    </dialog>
+
+    <dialog class="station-dialog ballot-dialog" id="ballotDialog">
+      <div class="dialog-frame">
+        <header>
+          <div><span>平等选票</span><h2>我的投票</h2></div>
+          <button class="plain-action" id="closeBallot" type="button">关闭</button>
+        </header>
+        <div class="ballot-identity" id="ballotIdentity"></div>
+        <div class="ballot-orbits" id="ballotOrbits"></div>
+        <div class="unexplored-note" id="unexploredNote"></div>
+        <section class="ballot-conflict" id="ballotConflict" hidden aria-live="polite">
+          <strong>另一台设备刚刚修改了选票</strong>
+          <p>服务器选票已经刷新。你可以保留最新结果，或重新应用刚才的修改。</p>
+          <div>
+            <button class="plain-action" id="acceptServerBallot" type="button">保留服务器选票</button>
+            <button class="secondary-action" id="retryBallotChange" type="button">重新应用修改</button>
+          </div>
+        </section>
+        <div class="ballot-footer">
+          <button class="secondary-action" id="ballotExplore" type="button">自动浏览全部作品</button>
+          <button class="plain-action" id="clearExploration" type="button">清除本机探索记录</button>
+          <button class="plain-action" id="logoutButton" type="button">退出登录</button>
+        </div>
+        <p class="form-message" id="ballotMessage" role="status"></p>
+      </div>
+    </dialog>
+
+    <section class="vote-ceremony" id="voteCeremony" hidden role="dialog" aria-modal="true" aria-labelledby="ceremonyTitle" data-phase="idle">
+      <div class="ceremony-distortion" aria-hidden="true">
+        <div class="ceremony-source" id="ceremonySource"></div>
+        <div class="ceremony-grid"></div>
+        <div class="ceremony-particles" id="ceremonyParticles"></div>
+      </div>
+      <header class="ceremony-topbar">
+        <div>
+          <span id="ceremonyCoordinate">PRIVATE OBSERVATORY</span>
+          <strong id="ceremonyIdentity">个人星系</strong>
+        </div>
+        <div>
+          <button class="plain-action inverse" id="ceremonySound" type="button" aria-pressed="false">仪式声音：开</button>
+          <button class="plain-action inverse" id="closeCeremony" type="button">返回</button>
+        </div>
+      </header>
+      <div class="ceremony-stage" id="ceremonyStage">
+        <div class="personal-system" id="personalSystem" aria-label="个人星系">
+          <div class="personal-orbit outer" aria-hidden="true"></div>
+          <div class="personal-orbit inner" aria-hidden="true"></div>
+          <div class="core-flight-path" id="coreFlightPath" aria-hidden="true"><i></i></div>
+          <div class="orbit-entry-target" id="orbitEntryTarget" hidden aria-hidden="true"><i></i><span>轨道接入点</span></div>
+          <div class="user-planet" id="userPlanet" aria-hidden="true"><i></i><b></b></div>
+          <div class="personal-core-layer" id="personalCoreLayer"></div>
+          <button class="floating-core" id="floatingCore" type="button" hidden aria-label="待入轨可能性核心。点击，将它送入你的轨道">
+            <span class="floating-core-body" aria-hidden="true"></span>
+            <i class="floating-core-spectrum" aria-hidden="true"></i>
+            <span class="floating-core-instruction"><b>待入轨核心</b><small>点击，送入轨道</small></span>
+          </button>
+        </div>
+      </div>
+      <aside class="ceremony-console">
+        <p id="ceremonyEyebrow">可能性核心提取</p>
+        <h2 id="ceremonyTitle">稳定作品信号</h2>
+        <p id="ceremonyStatus">持续按住三秒，从作品行星中提取可能性核心。</p>
+        <button class="extract-hold" id="extractHold" type="button" aria-describedby="ceremonyStatus" aria-label="持续按住三秒提取可能性核心">
+          <span><b id="extractProgress">0%</b><small>持续按住</small></span>
+        </button>
+        <div class="semantic-progress" id="extractProgressSemantic" role="progressbar" aria-label="可能性核心提取进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+        <div class="ceremony-hint" id="ceremonyHint" hidden aria-live="polite"></div>
+        <div class="core-inspector" id="coreInspector" hidden>
+          <span>轨道核心</span>
+          <strong id="inspectorTitle"></strong>
+          <small id="inspectorTeam"></small>
+          <div>
+            <button class="secondary-action" id="inspectGame" type="button">返回作品行星</button>
+            <button class="plain-action" id="prepareReturn" type="button">归还核心</button>
+          </div>
+        </div>
+        <div class="return-confirm" id="returnConfirm" hidden>
+          <strong>归还这颗可能性核心？</strong>
+          <p>投票截止前仍可再次为这款作品投票。</p>
+          <div>
+            <button class="plain-action" id="cancelReturn" type="button">保留核心</button>
+            <button class="secondary-action" id="confirmReturn" type="button">确认归还</button>
+          </div>
+        </div>
+        <div class="ceremony-success-actions" id="ceremonySuccessActions" hidden>
+          <button class="primary-action" id="ceremonyContinue" type="button">继续探索</button>
+          <button class="secondary-action" id="ceremonyReturnWork" type="button">返回作品</button>
+          <button class="plain-action inverse" id="ceremonyStay" type="button">留在个人星系</button>
+        </div>
+        <p class="ceremony-capacity" id="ceremonyCapacity">0/3 颗核心正在公转</p>
+      </aside>
+      <p class="ceremony-live" id="ceremonyLive" role="status" aria-live="polite"></p>
+    </section>
+
+    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
+    <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
+    <script src="/app.js?v=20260714p" defer></script>
   </body>
 </html>

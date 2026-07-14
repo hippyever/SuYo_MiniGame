@@ -1,4 +1,6 @@
 data/checkins.json
+data/minigame.json
+data/uploads/
 data/*.tmp
 node_modules/
 outputs/
