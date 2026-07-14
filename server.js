@@ -29,7 +29,8 @@ const OTP_MAX_REQUESTS_PER_HOUR = Math.max(2, Number(process.env.OTP_MAX_REQUEST
 const OTP_MAX_REQUESTS_PER_IP_PER_HOUR = Math.max(5, Number(process.env.OTP_MAX_REQUESTS_PER_IP_PER_HOUR || 20));
 const MAX_COVER_BYTES = Math.max(1, Number(process.env.MAX_COVER_MB || 12)) * 1024 * 1024;
 const MAX_AVATAR_BYTES = Math.max(1, Number(process.env.MAX_AVATAR_MB || 4)) * 1024 * 1024;
-const MAX_VIDEO_BYTES = Math.max(10, Number(process.env.MAX_VIDEO_MB || 300)) * 1024 * 1024;
+const MAX_VIDEO_BYTES = Math.max(10, Number(process.env.MAX_VIDEO_MB || 200)) * 1024 * 1024;
+const VIDEO_RETENTION_MS = Math.max(1, Number(process.env.VIDEO_RETENTION_DAYS || 7)) * 24 * 60 * 60 * 1000;
 const SESSION_TTL_MS = Math.max(1, Number(process.env.SESSION_TTL_DAYS || 30)) * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true"
   || (process.env.SESSION_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
@@ -166,6 +167,103 @@ function normalizeCreators(value) {
   }).filter((creator) => creator.name).sort((a, b) => a.order - b.order);
 }
 
+function normalizeTeamMembers(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 12).map((member) => ({
+    id: cleanText(member?.id, 80) || randomId(),
+    email: normalizeEmail(member?.email),
+    creatorId: cleanText(member?.creatorId, 80),
+    active: member?.active !== false,
+    addedAt: cleanText(member?.addedAt, 60) || new Date().toISOString(),
+    removedAt: cleanText(member?.removedAt, 60),
+    firstLoginAt: cleanText(member?.firstLoginAt, 60)
+  })).filter((member) => isValidEmail(member.email));
+}
+
+function normalizeAssetMeta(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    url: cleanAssetUrl(value.url),
+    originalName: cleanText(value.originalName, 240),
+    mimeType: cleanText(value.mimeType, 100),
+    size: Math.max(0, Number(value.size || 0)),
+    sha256: cleanText(value.sha256, 64),
+    uploadedBy: normalizeEmail(value.uploadedBy),
+    uploadedAt: cleanText(value.uploadedAt, 60) || new Date().toISOString(),
+    deleteAfter: cleanText(value.deleteAfter, 60)
+  };
+}
+
+function gameStatus(game) {
+  if (["draft", "submitted", "withdrawn"].includes(game?.status)) return game.status;
+  return game?.published ? "submitted" : "draft";
+}
+
+function isGamePublic(game) {
+  return gameStatus(game) === "submitted" && game.published !== false;
+}
+
+function gameMemberEmails(game, { historical = false } = {}) {
+  const emails = new Set();
+  const owner = normalizeEmail(game.ownerEmail);
+  if (owner) emails.add(owner);
+  for (const member of normalizeTeamMembers(game.teamMembers)) {
+    if (historical || member.active) emails.add(member.email);
+  }
+  if (historical) {
+    for (const email of Array.isArray(game.historicalTeamEmails) ? game.historicalTeamEmails : []) {
+      const normalized = normalizeEmail(email);
+      if (normalized) emails.add(normalized);
+    }
+    for (const email of Array.isArray(game.historicalOwnerEmails) ? game.historicalOwnerEmails : []) {
+      const normalized = normalizeEmail(email);
+      if (normalized) emails.add(normalized);
+    }
+  }
+  return emails;
+}
+
+function participantRole(game, email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  if (normalizeEmail(game.ownerEmail) === normalized) return { role: "owner", member: null };
+  const member = normalizeTeamMembers(game.teamMembers).find((item) => item.active && item.email === normalized);
+  return member ? { role: "member", member } : null;
+}
+
+function participantGame(store, email) {
+  for (const game of store.games) {
+    const access = participantRole(game, email);
+    if (access) return { game, ...access };
+  }
+  return null;
+}
+
+function submissionDeadlineMs(settings) {
+  return Date.parse(settings.submissionEndAt || settings.endAt || 0);
+}
+
+function isAfterSubmissionDeadline(settings, now = Date.now()) {
+  const deadline = submissionDeadlineMs(settings);
+  return Number.isFinite(deadline) && Math.floor(now / 1000) > Math.floor(deadline / 1000);
+}
+
+function markLateSubmission(store, game, reason, actor) {
+  const now = new Date().toISOString();
+  game.lateSubmission = true;
+  game.lateMarkedAt = now;
+  game.lateReasons = Array.isArray(game.lateReasons) ? game.lateReasons : [];
+  game.lateReasons.push({ id: randomId(), reason, createdAt: now, actorEmail: normalizeEmail(actor?.email), actorType: actor?.type || "participant" });
+  addAudit(store, {
+    action: "game_marked_late",
+    actorType: actor?.type || "participant",
+    actorId: actor?.id || actor?.email || "system",
+    actorEmail: normalizeEmail(actor?.email),
+    gameId: game.id,
+    reason,
+    after: { lateSubmission: true }
+  });
+}
+
 function normalizedPersonName(value) {
   return cleanText(value, 80).normalize("NFKC").toLowerCase().replace(/\s+/g, "");
 }
@@ -205,7 +303,7 @@ function ensureGameCoordinates(store) {
 
 function createEmptyStore() {
   return {
-    version: 4,
+    version: 5,
     createdAt: new Date().toISOString(),
     games: seedGames(),
     ballots: [],
@@ -213,6 +311,7 @@ function createEmptyStore() {
     verificationCodes: {},
     sessions: {},
     audit: [],
+    retiredAssets: [],
     settings: {
       eventTitle: "溯造 MiniGame 游戏开发大赛",
       theme: "宇宙",
@@ -220,6 +319,7 @@ function createEmptyStore() {
       eventSeed: crypto.randomBytes(12).toString("hex"),
       startAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       endAt: isoAfter(14),
+      submissionEndAt: isoAfter(7),
       resultsPublished: false,
       winnerGameIds: [],
       constellationGameIds: [],
@@ -232,13 +332,41 @@ function createEmptyStore() {
 function migrateStore(store) {
   const empty = createEmptyStore();
   const defaultDemoById = new Map(empty.games.map((game) => [game.id, game]));
-  store.version = 4;
-  store.games = (Array.isArray(store.games) ? store.games : empty.games).map((game) => ({
-    ...game,
-    creationNote: cleanText(game.creationNote, 600) || (game.isDemo ? cleanText(defaultDemoById.get(game.id)?.creationNote, 600) : ""),
-    creators: normalizeCreators(game.creators),
-    planetSeed: cleanText(game.planetSeed, 80) || crypto.createHash("sha256").update(String(game.id || randomId())).digest("hex").slice(0, 16)
-  }));
+  store.version = 5;
+  store.games = (Array.isArray(store.games) ? store.games : empty.games).map((game) => {
+    const status = gameStatus(game);
+    const legacyVideo = cleanAssetUrl(game.videoUrl);
+    const uploadedVideoUrl = cleanAssetUrl(game.uploadedVideoUrl) || (legacyVideo.startsWith("/uploads/") ? legacyVideo : "");
+    const videoExternalUrl = cleanUrl(game.videoExternalUrl) || (!legacyVideo.startsWith("/uploads/") ? legacyVideo : "");
+    const submittedAt = cleanText(game.submittedAt, 60) || (status === "submitted" ? cleanText(game.updatedAt || game.createdAt, 60) : "");
+    const ownerEmail = normalizeEmail(game.ownerEmail);
+    return {
+      ...game,
+      status,
+      published: status === "submitted" && game.published !== false,
+      ownerEmail,
+      ownerCreatorId: cleanText(game.ownerCreatorId, 80),
+      historicalOwnerEmails: [...new Set([ownerEmail, ...(Array.isArray(game.historicalOwnerEmails) ? game.historicalOwnerEmails : [])].map(normalizeEmail).filter(Boolean))],
+      teamMembers: normalizeTeamMembers(game.teamMembers),
+      historicalTeamEmails: [...new Set((Array.isArray(game.historicalTeamEmails) ? game.historicalTeamEmails : []).map(normalizeEmail).filter(Boolean))],
+      firstSubmittedAt: cleanText(game.firstSubmittedAt, 60) || submittedAt,
+      submittedAt,
+      withdrawnAt: cleanText(game.withdrawnAt, 60),
+      lateSubmission: Boolean(game.lateSubmission),
+      lateMarkedAt: cleanText(game.lateMarkedAt, 60),
+      lateReasons: Array.isArray(game.lateReasons) ? game.lateReasons : [],
+      revision: Math.max(1, Number(game.revision || 1)),
+      uploadedVideoUrl,
+      videoExternalUrl,
+      videoUrl: uploadedVideoUrl || videoExternalUrl,
+      assetMeta: game.assetMeta && typeof game.assetMeta === "object" ? game.assetMeta : {},
+      assetHistory: Array.isArray(game.assetHistory) ? game.assetHistory : [],
+      downloadHistory: Array.isArray(game.downloadHistory) ? game.downloadHistory : [],
+      creationNote: cleanText(game.creationNote, 600) || (game.isDemo ? cleanText(defaultDemoById.get(game.id)?.creationNote, 600) : ""),
+      creators: normalizeCreators(game.creators),
+      planetSeed: cleanText(game.planetSeed, 80) || crypto.createHash("sha256").update(String(game.id || randomId())).digest("hex").slice(0, 16)
+    };
+  });
   store.ballots = Array.isArray(store.ballots) ? store.ballots : [];
   store.ballots.forEach((ballot) => {
     ballot.gameIds = [...new Set(Array.isArray(ballot.gameIds) ? ballot.gameIds : [])].slice(0, 3);
@@ -254,7 +382,10 @@ function migrateStore(store) {
   store.verificationCodes = store.verificationCodes && typeof store.verificationCodes === "object" ? store.verificationCodes : {};
   store.sessions = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
   store.audit = Array.isArray(store.audit) ? store.audit : [];
-  store.settings = { ...empty.settings, ...(store.settings || {}) };
+  store.retiredAssets = (Array.isArray(store.retiredAssets) ? store.retiredAssets : []).map(normalizeAssetMeta).filter((asset) => asset?.url);
+  const previousSettings = store.settings && typeof store.settings === "object" ? store.settings : {};
+  store.settings = { ...empty.settings, ...previousSettings };
+  if (!previousSettings.submissionEndAt) store.settings.submissionEndAt = previousSettings.endAt || empty.settings.submissionEndAt;
   if (store.settings.eventTitle === "溯造 MiniGame 2026") store.settings.eventTitle = empty.settings.eventTitle;
   if (!store.settings.eventSeed) store.settings.eventSeed = empty.settings.eventSeed;
   if (typeof store.settings.resultsPublished !== "boolean") store.settings.resultsPublished = store.settings.resultsVisibility === "always";
@@ -268,7 +399,15 @@ async function ensureStore() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.mkdir(UPLOAD_DIR, { recursive: true });
   try {
-    return migrateStore(JSON.parse(await fsp.readFile(STORE_FILE, "utf8")));
+    const store = migrateStore(JSON.parse(await fsp.readFile(STORE_FILE, "utf8")));
+    const expired = store.retiredAssets.filter((asset) => asset.deleteAfter && Date.parse(asset.deleteAfter) <= Date.now());
+    if (expired.length) {
+      await Promise.all(expired.map((asset) => removeLocalAsset(asset.url)));
+      const expiredUrls = new Set(expired.map((asset) => asset.url));
+      store.retiredAssets = store.retiredAssets.filter((asset) => !expiredUrls.has(asset.url));
+      await writeStore(store);
+    }
+    return store;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     const store = createEmptyStore();
@@ -405,6 +544,12 @@ function publicIdentity(session) {
   return session ? { name: session.name, team: session.team, email: session.email } : null;
 }
 
+function selfBlockedGameIds(store, email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return [];
+  return store.games.filter((game) => gameMemberEmails(game, { historical: true }).has(normalized)).map((game) => game.id);
+}
+
 function ballotForSession(store, session) {
   if (!session) return null;
   return store.ballots.find((ballot) => ballot.email === session.email && ballot.personKey === session.personKey) || null;
@@ -475,7 +620,7 @@ function voteCounts(store) {
 function rankedGames(store) {
   const counts = voteCounts(store);
   return store.games
-    .filter((game) => game.published)
+    .filter(isGamePublic)
     .map((game) => ({ id: game.id, title: game.title, team: game.team, coverUrl: game.coverUrl, voteCount: counts[game.id] || 0 }))
     .sort((a, b) => b.voteCount - a.voteCount || a.title.localeCompare(b.title, "zh-Hans-CN"));
 }
@@ -527,7 +672,7 @@ function publicSite(store) {
   const showResults = Boolean(store.settings.resultsPublished);
   ensureGameCoordinates(store);
   const games = store.games
-    .filter((game) => game.published)
+    .filter(isGamePublic)
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || a.createdAt.localeCompare(b.createdAt))
     .map((game) => ({
       id: game.id,
@@ -539,7 +684,9 @@ function publicSite(store) {
       creators: normalizeCreators(game.creators),
       coverUrl: game.coverUrl,
       videoUrl: game.videoUrl,
+      videoExternalUrl: game.videoExternalUrl || "",
       downloadUrl: game.downloadUrl,
+      lateSubmission: Boolean(game.lateSubmission),
       tags: game.tags || [],
       planetSeed: game.planetSeed,
       coordinate: game.coordinate
@@ -553,7 +700,8 @@ function publicSite(store) {
       slogan: store.settings.slogan,
       eventSeed: store.settings.eventSeed,
       startAt: store.settings.startAt,
-      endAt: store.settings.endAt
+      endAt: store.settings.endAt,
+      submissionEndAt: store.settings.submissionEndAt
     },
     votingState: state,
     resultsVisible: showResults,
@@ -593,11 +741,23 @@ async function deliverCode({ email, name, code }) {
   await getMailTransport().sendMail({
     from: process.env.MAIL_FROM,
     to: email,
-    subject: "溯造 MiniGame 投票验证码",
-    text: `${name}，你好。你的投票验证码是 ${code}，${Math.round(OTP_TTL_MS / 60000)} 分钟内有效。请勿转发给他人。`,
-    html: `<div style="font-family:Arial,'Microsoft YaHei',sans-serif;max-width:520px;margin:auto;padding:32px;color:#171717"><p style="font-size:14px">${escapeHtml(name)}，你好</p><h1 style="font-size:42px;letter-spacing:8px;margin:24px 0">${code}</h1><p style="line-height:1.7;color:#555">这是你的溯造 MiniGame 投票验证码，${Math.round(OTP_TTL_MS / 60000)} 分钟内有效。请勿转发给他人。</p><p style="margin-top:30px;font-size:13px;color:#777">溯求本源，造物不止</p></div>`
+    subject: "溯造 MiniGame 身份验证码",
+    text: `${name}，你好。你的身份验证码是 ${code}，${Math.round(OTP_TTL_MS / 60000)} 分钟内有效。请勿转发给他人。`,
+    html: `<div style="font-family:Arial,'Microsoft YaHei',sans-serif;max-width:520px;margin:auto;padding:32px;color:#171717"><p style="font-size:14px">${escapeHtml(name)}，你好</p><h1 style="font-size:42px;letter-spacing:8px;margin:24px 0">${code}</h1><p style="line-height:1.7;color:#555">这是你的溯造 MiniGame 身份验证码，可用于投票或管理参展作品，${Math.round(OTP_TTL_MS / 60000)} 分钟内有效。请勿转发给他人。</p><p style="margin-top:30px;font-size:13px;color:#777">溯求本源，造物不止</p></div>`
   });
   return {};
+}
+
+async function deliverTeamInvitation({ email, name, eventTitle, gameTitle, ownerName, loginUrl }) {
+  if (!smtpConfigured()) return { skipped: true };
+  await getMailTransport().sendMail({
+    from: process.env.MAIL_FROM,
+    to: email,
+    subject: `${eventTitle}：你已加入《${gameTitle}》制作队伍`,
+    text: `${name}，你好。${ownerName} 已在${eventTitle}中将你加入《${gameTitle}》制作队伍。使用此邮箱登录后即可编辑作品。登录入口：${loginUrl}`,
+    html: `<div style="font-family:Arial,'Microsoft YaHei',sans-serif;max-width:560px;margin:auto;padding:32px;color:#171717"><p>${escapeHtml(name)}，你好。</p><p style="font-size:13px;color:#777">${escapeHtml(eventTitle)}</p><h1 style="font-size:26px;margin:22px 0">你已加入《${escapeHtml(gameTitle)}》</h1><p style="line-height:1.8;color:#555">${escapeHtml(ownerName)} 已将你加入作品制作队伍。无需接受邀请，使用此邮箱完成验证码登录后即可编辑作品。</p><p style="margin:28px 0"><a href="${escapeHtml(loginUrl)}" style="display:inline-block;padding:12px 18px;background:#b7d64a;color:#111;text-decoration:none">进入参赛作品工作台</a></p><p style="font-size:13px;color:#777">溯求本源，造物不止</p></div>`
+  });
+  return { skipped: false };
 }
 
 function escapeHtml(value) {
@@ -613,9 +773,6 @@ async function handleRequestCode(req, res) {
     return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写姓名、队伍和有效邮箱。" });
   }
   const store = await ensureStore();
-  if (votingState(store.settings) !== "open") {
-    return json(res, 409, { ok: false, error: "VOTING_CLOSED", message: "当前不在投票时间内。" });
-  }
   const previous = store.verificationCodes[email];
   const now = Date.now();
   const sourceIp = clientIp(req);
@@ -696,7 +853,6 @@ function ballotPayload(ballot) {
 
 function addAudit(store, event) {
   store.audit.push({ id: randomId(), createdAt: new Date().toISOString(), ...event });
-  if (store.audit.length > 10000) store.audit = store.audit.slice(-10000);
 }
 
 async function handleAuthVerify(req, res) {
@@ -710,12 +866,6 @@ async function handleAuthVerify(req, res) {
   }
   const token = crypto.randomBytes(32).toString("base64url");
   const result = await mutateStore((store) => {
-    if (votingState(store.settings) !== "open") {
-      const error = new Error("当前不在投票时间内。");
-      error.status = 409;
-      error.code = "VOTING_CLOSED";
-      throw error;
-    }
     verifyCode(store, { name, team, email, code });
     const key = personKey(name, team);
     const byEmail = store.ballots.find((ballot) => ballot.email === email);
@@ -748,15 +898,30 @@ async function handleAuthVerify(req, res) {
       userAgent: cleanText(req.headers["user-agent"], 300)
     };
     store.sessions[sessionHash(token)] = session;
+    for (const game of store.games) {
+      const member = normalizeTeamMembers(game.teamMembers).find((item) => item.active && item.email === email);
+      if (!member || member.firstLoginAt) continue;
+      const storedMember = game.teamMembers.find((item) => item.id === member.id);
+      if (storedMember) storedMember.firstLoginAt = session.createdAt;
+      addAudit(store, {
+        action: "team_member_first_login",
+        actorType: "participant",
+        actorId: session.id,
+        actorEmail: email,
+        gameId: game.id,
+        memberId: member.id
+      });
+    }
     delete store.verificationCodes[email];
     addAudit(store, { action: "session_verified", actorType: "voter", actorId: session.id, voterEmail: email });
-    return { session, ballot: ballotPayload(byEmail) };
+    return { session, ballot: ballotPayload(byEmail), selfBlockedGameIds: selfBlockedGameIds(store, email) };
   });
   return json(res, 200, {
     ok: true,
     authenticated: true,
     identity: publicIdentity(result.session),
     ballot: result.ballot,
+    selfBlockedGameIds: result.selfBlockedGameIds,
     message: "身份验证成功。"
   }, { "set-cookie": sessionCookie(token) });
 }
@@ -776,7 +941,8 @@ async function handlePublicSession(req, res) {
     ok: true,
     authenticated: true,
     identity: publicIdentity(record.session),
-    ballot: ballotPayload(ballotForSession(store, record.session))
+    ballot: ballotPayload(ballotForSession(store, record.session)),
+    selfBlockedGameIds: selfBlockedGameIds(store, record.session.email)
   });
 }
 
@@ -880,7 +1046,7 @@ async function handleBallot(req, res) {
       error.details = { ballot: ballotPayload(ballot) };
       throw error;
     }
-    const publishedGames = store.games.filter((game) => game.published);
+    const publishedGames = store.games.filter(isGamePublic);
     const gameById = new Map(publishedGames.map((game) => [game.id, game]));
     if (gameIds.some((id) => !gameById.has(id))) {
       const error = new Error("选择中包含无效或已下架的游戏。");
@@ -888,8 +1054,8 @@ async function handleBallot(req, res) {
       error.code = "INVALID_GAME";
       throw error;
     }
-    const voterName = normalizedPersonName(record.session.name);
-    const selfVoted = gameIds.map((id) => gameById.get(id)).find((game) => normalizeCreators(game.creators).some((creator) => normalizedPersonName(creator.name) === voterName));
+    const voterEmail = normalizeEmail(record.session.email);
+    const selfVoted = gameIds.map((id) => gameById.get(id)).find((game) => gameMemberEmails(game, { historical: true }).has(voterEmail));
     if (selfVoted) {
       const error = new Error(`你参与了《${selfVoted.title}》的制作，不能为自己的作品投票。`);
       error.status = 409;
@@ -978,15 +1144,14 @@ async function handleVote(req, res) {
         error.code = "VOTING_CLOSED";
         throw error;
       }
-      const validIds = new Set(store.games.filter((game) => game.published).map((game) => game.id));
+      const validIds = new Set(store.games.filter(isGamePublic).map((game) => game.id));
       if (gameIds.some((id) => !validIds.has(id))) {
         const error = new Error("选择中包含无效或已下架的游戏。");
         error.status = 400;
         error.code = "INVALID_GAME";
         throw error;
       }
-      const voterName = normalizedPersonName(name);
-      const selfVoted = store.games.find((game) => gameIds.includes(game.id) && normalizeCreators(game.creators).some((creator) => normalizedPersonName(creator.name) === voterName));
+      const selfVoted = store.games.find((game) => gameIds.includes(game.id) && gameMemberEmails(game, { historical: true }).has(email));
       if (selfVoted) {
         const error = new Error(`你参与了《${selfVoted.title}》的制作，不能为自己的作品投票。`);
         error.status = 409;
@@ -1110,7 +1275,7 @@ async function parseGameMultipart(req) {
     busboy.on("file", (name, stream, info) => {
       const isCover = name === "cover";
       const isVideo = name === "video";
-      const isAvatar = /^avatar-\d{1,2}$/.test(name);
+      const isAvatar = /^avatar-\d{1,2}$/.test(name) || name === "profileAvatar";
       if ((!isCover && !isVideo && !isAvatar) || !info.filename) {
         stream.resume();
         return;
@@ -1124,11 +1289,13 @@ async function parseGameMultipart(req) {
       const limit = isCover ? MAX_COVER_BYTES : isAvatar ? MAX_AVATAR_BYTES : MAX_VIDEO_BYTES;
       let size = 0;
       let exceeded = false;
+      const digest = crypto.createHash("sha256");
       const filename = `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extensionFor(info.mimeType, info.filename)}`;
       const target = path.join(UPLOAD_DIR, filename);
       createdFiles.push(target);
       stream.on("data", (chunk) => {
         size += chunk.length;
+        digest.update(chunk);
         if (size > limit) exceeded = true;
       });
       const task = pipeline(stream, fs.createWriteStream(target)).then(() => {
@@ -1141,7 +1308,7 @@ async function parseGameMultipart(req) {
           error.status = 413;
           throw error;
         }
-        files[name] = { url: `/uploads/${filename}`, target, mimeType: info.mimeType, originalName: info.filename, size };
+        files[name] = { url: `/uploads/${filename}`, target, mimeType: info.mimeType, originalName: info.filename, size, sha256: digest.digest("hex") };
       });
       tasks.push(task);
     });
@@ -1201,11 +1368,24 @@ function creatorsFromFields(fields, files, existing = null) {
   }).filter((creator) => creator.name);
 }
 
-function gameFromFields(fields, files, existing = null) {
+function fileAssetMeta(file, uploadedBy = "") {
+  if (!file) return null;
+  return {
+    url: file.url,
+    originalName: cleanText(file.originalName, 240),
+    mimeType: cleanText(file.mimeType, 100),
+    size: Math.max(0, Number(file.size || 0)),
+    sha256: cleanText(file.sha256, 64),
+    uploadedBy: normalizeEmail(uploadedBy),
+    uploadedAt: new Date().toISOString()
+  };
+}
+
+function gameFromFields(fields, files, existing = null, options = {}) {
   const title = cleanText(fields.title, 60);
   const team = cleanText(fields.team, 60);
   const shortDescription = cleanText(fields.shortDescription, 120);
-  if (!title || !team || !shortDescription) {
+  if (!title || (!options.allowDraft && (!team || !shortDescription))) {
     const error = new Error("游戏名称、制作团队和一句话介绍不能为空。" );
     error.status = 400;
     throw error;
@@ -1213,6 +1393,18 @@ function gameFromFields(fields, files, existing = null) {
   const now = new Date().toISOString();
   const tags = cleanText(fields.tags, 120).split(/[,，]/).map((tag) => cleanText(tag, 16)).filter(Boolean).slice(0, 4);
   const creators = creatorsFromFields(fields, files, existing);
+  const hasCoverUrl = Object.hasOwn(fields, "coverUrl");
+  const hasDownloadUrl = Object.hasOwn(fields, "downloadUrl");
+  const hasVideoExternalUrl = Object.hasOwn(fields, "videoExternalUrl") || Object.hasOwn(fields, "videoUrl");
+  const uploadedVideoUrl = files.video?.url
+    || (fields.removeUploadedVideo === "true" ? "" : cleanAssetUrl(existing?.uploadedVideoUrl || (String(existing?.videoUrl || "").startsWith("/uploads/") ? existing.videoUrl : "")));
+  const videoExternalInput = Object.hasOwn(fields, "videoExternalUrl") ? fields.videoExternalUrl : fields.videoUrl;
+  const videoExternalUrl = hasVideoExternalUrl
+    ? cleanUrl(videoExternalInput)
+    : cleanUrl(existing?.videoExternalUrl || (!String(existing?.videoUrl || "").startsWith("/uploads/") ? existing?.videoUrl : ""));
+  const assetMeta = { ...(existing?.assetMeta || {}) };
+  if (files.cover) assetMeta.cover = fileAssetMeta(files.cover, options.actorEmail);
+  if (files.video) assetMeta.video = fileAssetMeta(files.video, options.actorEmail);
   return {
     id: existing?.id || `${title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-|-$/g, "").slice(0, 36) || "game"}-${crypto.randomBytes(3).toString("hex")}`,
     title,
@@ -1221,25 +1413,604 @@ function gameFromFields(fields, files, existing = null) {
     description: cleanText(fields.description, 1200),
     creationNote: cleanText(fields.creationNote, 600),
     creators,
-    coverUrl: files.cover?.url || cleanUrl(fields.coverUrl) || existing?.coverUrl || "",
-    videoUrl: files.video?.url || cleanUrl(fields.videoUrl) || existing?.videoUrl || "",
-    downloadUrl: cleanUrl(fields.downloadUrl) || existing?.downloadUrl || "",
+    coverUrl: files.cover?.url || (hasCoverUrl ? cleanAssetUrl(fields.coverUrl) : cleanAssetUrl(existing?.coverUrl)) || "",
+    uploadedVideoUrl,
+    videoExternalUrl,
+    videoUrl: uploadedVideoUrl || videoExternalUrl,
+    downloadUrl: hasDownloadUrl ? cleanUrl(fields.downloadUrl) : cleanUrl(existing?.downloadUrl),
     tags,
     featured: fields.featured === "true" || fields.featured === "on",
-    published: fields.published === "true" || fields.published === "on",
+    published: options.preservePublication ? Boolean(existing?.published) : fields.published === "true" || fields.published === "on",
     order: Number.isFinite(Number(fields.order)) ? Number(fields.order) : Number(existing?.order || 100),
     planetSeed: existing?.planetSeed || crypto.createHash("sha256").update(`${title}:${team}:${Date.now()}`).digest("hex").slice(0, 16),
     coordinate: existing?.coordinate || null,
+    status: existing ? gameStatus(existing) : "draft",
+    ownerEmail: normalizeEmail(existing?.ownerEmail),
+    ownerCreatorId: cleanText(existing?.ownerCreatorId, 80),
+    historicalOwnerEmails: Array.isArray(existing?.historicalOwnerEmails) ? existing.historicalOwnerEmails : [],
+    teamMembers: normalizeTeamMembers(existing?.teamMembers),
+    historicalTeamEmails: Array.isArray(existing?.historicalTeamEmails) ? existing.historicalTeamEmails : [],
+    firstSubmittedAt: cleanText(existing?.firstSubmittedAt, 60),
+    submittedAt: cleanText(existing?.submittedAt, 60),
+    withdrawnAt: cleanText(existing?.withdrawnAt, 60),
+    lateSubmission: Boolean(existing?.lateSubmission),
+    lateMarkedAt: cleanText(existing?.lateMarkedAt, 60),
+    lateReasons: Array.isArray(existing?.lateReasons) ? existing.lateReasons : [],
+    revision: Math.max(1, Number(existing?.revision || 0) + 1),
+    assetMeta,
+    assetHistory: Array.isArray(existing?.assetHistory) ? existing.assetHistory : [],
+    downloadHistory: Array.isArray(existing?.downloadHistory) ? existing.downloadHistory : [],
     isDemo: false,
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
 }
 
+function gameAuditSnapshot(game) {
+  return {
+    title: game.title,
+    team: game.team,
+    shortDescription: game.shortDescription,
+    description: game.description,
+    creationNote: game.creationNote,
+    creators: normalizeCreators(game.creators),
+    coverUrl: game.coverUrl,
+    uploadedVideoUrl: game.uploadedVideoUrl || "",
+    videoExternalUrl: game.videoExternalUrl || "",
+    downloadUrl: game.downloadUrl,
+    tags: game.tags || [],
+    status: gameStatus(game),
+    published: Boolean(game.published),
+    ownerEmail: normalizeEmail(game.ownerEmail),
+    teamMembers: normalizeTeamMembers(game.teamMembers),
+    lateSubmission: Boolean(game.lateSubmission),
+    revision: Number(game.revision || 1)
+  };
+}
+
+function changedGameFields(before, after) {
+  const changes = {};
+  for (const key of Object.keys(after)) {
+    if (JSON.stringify(before?.[key]) !== JSON.stringify(after[key])) changes[key] = { before: before?.[key], after: after[key] };
+  }
+  return changes;
+}
+
+function submissionMissingFields(game) {
+  const missing = [];
+  if (!cleanText(game.title, 60)) missing.push("游戏名称");
+  if (!cleanText(game.team, 60)) missing.push("队伍名称");
+  if (!cleanText(game.description, 1200)) missing.push("游戏简介");
+  if (!cleanAssetUrl(game.coverUrl)) missing.push("游戏封面");
+  if (!cleanAssetUrl(game.uploadedVideoUrl) && !cleanUrl(game.videoExternalUrl)) missing.push("演示视频");
+  if (!cleanUrl(game.downloadUrl)) missing.push("游戏下载地址");
+  if (!normalizeCreators(game.creators).length) missing.push("制作人员");
+  return missing;
+}
+
+function participantGamePayload(game, access, settings) {
+  if (!game) return null;
+  return {
+    ...gameAuditSnapshot(game),
+    id: game.id,
+    coordinate: game.coordinate,
+    planetSeed: game.planetSeed,
+    createdAt: game.createdAt,
+    updatedAt: game.updatedAt,
+    firstSubmittedAt: game.firstSubmittedAt || "",
+    submittedAt: game.submittedAt || "",
+    withdrawnAt: game.withdrawnAt || "",
+    lateMarkedAt: game.lateMarkedAt || "",
+    role: access.role,
+    editableCreatorId: access.member?.creatorId || game.ownerCreatorId || "",
+    submissionEndAt: settings.submissionEndAt,
+    afterSubmissionDeadline: isAfterSubmissionDeadline(settings),
+    missingFields: submissionMissingFields(game)
+  };
+}
+
+function scheduleReplacedAssets(store, existing, updated, files, actorEmail = "") {
+  const now = new Date().toISOString();
+  updated.assetHistory = Array.isArray(existing.assetHistory) ? [...existing.assetHistory] : [];
+  if (files.cover && existing.assetMeta?.cover) updated.assetHistory.push({ kind: "cover", ...existing.assetMeta.cover, replacedAt: now });
+  if ((files.video || existing.uploadedVideoUrl !== updated.uploadedVideoUrl) && existing.assetMeta?.video) {
+    const retired = { kind: "video", ...existing.assetMeta.video, replacedAt: now, deleteAfter: new Date(Date.now() + VIDEO_RETENTION_MS).toISOString() };
+    updated.assetHistory.push(retired);
+    if (retired.url?.startsWith("/uploads/")) store.retiredAssets.push(retired);
+  }
+  for (const [name, file] of Object.entries(files)) {
+    if (!/^avatar-\d{1,2}$/.test(name)) continue;
+    const index = Number(name.split("-")[1]);
+    const oldCreator = normalizeCreators(existing.creators)[index];
+    if (oldCreator?.avatarUrl) updated.assetHistory.push({ kind: "avatar", url: oldCreator.avatarUrl, creatorId: oldCreator.id, replacedAt: now });
+    const creator = normalizeCreators(updated.creators)[index];
+    if (creator) {
+      updated.assetMeta.avatars ||= {};
+      updated.assetMeta.avatars[creator.id] = fileAssetMeta(file, actorEmail);
+    }
+  }
+}
+
 async function removeLocalAsset(url) {
   if (!String(url || "").startsWith("/uploads/")) return;
   const target = path.resolve(UPLOAD_DIR, path.basename(url));
   if (target.startsWith(UPLOAD_DIR)) await fsp.unlink(target).catch(() => {});
+}
+
+function requireParticipantSession(store, req) {
+  const record = sessionRecord(store, req);
+  if (!record) {
+    const error = new Error("登录状态已失效，请重新完成邮箱验证。");
+    error.status = 401;
+    error.code = "LOGIN_REQUIRED";
+    throw error;
+  }
+  return record;
+}
+
+function requestOrigin(req) {
+  const protocol = cleanText(req.headers["x-forwarded-proto"], 12) || (SESSION_COOKIE_SECURE ? "https" : "http");
+  const host = cleanText(req.headers["x-forwarded-host"] || req.headers.host, 200) || `localhost:${PORT}`;
+  return `${protocol}://${host.split(",")[0].trim()}`;
+}
+
+async function handleParticipantWorkspace(req, res) {
+  const store = await ensureStore();
+  const record = requireParticipantSession(store, req);
+  const access = participantGame(store, record.session.email);
+  return json(res, 200, {
+    ok: true,
+    identity: publicIdentity(record.session),
+    canCreate: !access,
+    game: access ? participantGamePayload(access.game, access, store.settings) : null,
+    settings: {
+      submissionEndAt: store.settings.submissionEndAt,
+      votingStartAt: store.settings.startAt,
+      votingEndAt: store.settings.endAt,
+      timeZone: TZ,
+      maxVideoBytes: MAX_VIDEO_BYTES,
+      videoRetentionDays: Math.round(VIDEO_RETENTION_MS / 86400000)
+    }
+  });
+}
+
+async function handleParticipantCreateGame(req, res) {
+  const parsed = await parseGameMultipart(req);
+  try {
+    const created = await mutateStore((store) => {
+      const record = requireParticipantSession(store, req);
+      if (participantGame(store, record.session.email)) {
+        const error = new Error("每个邮箱只能负责或加入一款参展作品。");
+        error.status = 409;
+        error.code = "PARTICIPANT_ALREADY_ASSIGNED";
+        throw error;
+      }
+      parsed.fields.team ||= record.session.team;
+      const game = gameFromFields(parsed.fields, parsed.files, null, { allowDraft: true, actorEmail: record.session.email });
+      const ownerCreator = { id: randomId(), name: record.session.name, role: "负责人", avatarUrl: "", order: 0 };
+      game.creators = [ownerCreator];
+      game.ownerEmail = record.session.email;
+      game.ownerCreatorId = ownerCreator.id;
+      game.status = "draft";
+      game.published = false;
+      game.teamMembers = [];
+      game.historicalTeamEmails = [];
+      game.historicalOwnerEmails = [record.session.email];
+      game.coordinate = coordinateForGame(game.id, store.settings.eventSeed, store.games);
+      store.games.push(game);
+      addAudit(store, {
+        action: "game_draft_created",
+        actorType: "participant",
+        actorId: record.session.id,
+        actorEmail: record.session.email,
+        gameId: game.id,
+        after: gameAuditSnapshot(game)
+      });
+      return { game, access: { role: "owner", member: null } };
+    });
+    return json(res, 201, { ok: true, game: participantGamePayload(created.game, created.access, (await ensureStore()).settings), message: "作品草稿已建立。" });
+  } catch (error) {
+    await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
+    throw error;
+  }
+}
+
+async function handleParticipantUpdateGame(req, res, id) {
+  const parsed = await parseGameMultipart(req);
+  try {
+    const result = await mutateStore((store) => {
+      const record = requireParticipantSession(store, req);
+      const index = store.games.findIndex((game) => game.id === id);
+      if (index < 0) {
+        const error = new Error("没有找到这款作品。");
+        error.status = 404;
+        throw error;
+      }
+      const existing = store.games[index];
+      const access = participantRole(existing, record.session.email);
+      if (!access) {
+        const error = new Error("权限已变更，你已不能修改这款作品。");
+        error.status = 403;
+        error.code = "PARTICIPANT_PERMISSION_CHANGED";
+        throw error;
+      }
+      const expectedRevision = Number(parsed.fields.revision || 0);
+      if (expectedRevision && expectedRevision !== Number(existing.revision || 1)) {
+        const error = new Error("作品已在另一个页面更新，请刷新后重试。");
+        error.status = 409;
+        error.code = "GAME_REVISION_CONFLICT";
+        error.details = { game: participantGamePayload(existing, access, store.settings) };
+        throw error;
+      }
+      parsed.fields.creatorsJson = JSON.stringify(existing.creators || []);
+      const before = gameAuditSnapshot(existing);
+      const updated = gameFromFields(parsed.fields, parsed.files, existing, {
+        allowDraft: true,
+        preservePublication: true,
+        actorEmail: record.session.email
+      });
+      updated.status = gameStatus(existing);
+      updated.published = isGamePublic(existing);
+      const downloadChanged = cleanUrl(existing.downloadUrl) !== cleanUrl(updated.downloadUrl);
+      if (downloadChanged && existing.firstSubmittedAt && isAfterSubmissionDeadline(store.settings)) {
+        if (parsed.fields.confirmLateDownload !== "true") {
+          const error = new Error("截止后修改游戏下载地址会永久产生补交标记，请确认后再次保存。");
+          error.status = 409;
+          error.code = "LATE_DOWNLOAD_CONFIRM_REQUIRED";
+          throw error;
+        }
+        markLateSubmission(store, updated, "download_url_changed_after_deadline", { type: "participant", id: record.session.id, email: record.session.email });
+      }
+      if (downloadChanged) {
+        updated.downloadHistory = [...(existing.downloadHistory || []), {
+          id: randomId(),
+          before: cleanUrl(existing.downloadUrl),
+          after: cleanUrl(updated.downloadUrl),
+          actorEmail: record.session.email,
+          createdAt: new Date().toISOString()
+        }];
+      }
+      scheduleReplacedAssets(store, existing, updated, parsed.files, record.session.email);
+      const after = gameAuditSnapshot(updated);
+      const changes = changedGameFields(before, after);
+      store.games[index] = updated;
+      addAudit(store, {
+        action: "game_content_updated",
+        actorType: "participant",
+        actorId: record.session.id,
+        actorEmail: record.session.email,
+        gameId: id,
+        before,
+        after,
+        changes
+      });
+      return { game: updated, access };
+    });
+    const store = await ensureStore();
+    return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "作品详情已保存。" });
+  } catch (error) {
+    await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
+    throw error;
+  }
+}
+
+async function handleParticipantSubmitGame(req, res, id) {
+  const result = await mutateStore((store) => {
+    const record = requireParticipantSession(store, req);
+    const game = store.games.find((item) => item.id === id);
+    if (!game) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const access = participantRole(game, record.session.email);
+    if (!access || access.role !== "owner") {
+      const error = new Error("只有作品负责人可以提交参展。");
+      error.status = 403;
+      throw error;
+    }
+    if (gameStatus(game) === "submitted") {
+      const error = new Error("作品已经提交参展。");
+      error.status = 409;
+      throw error;
+    }
+    const missing = submissionMissingFields(game);
+    if (missing.length) {
+      const error = new Error(`提交前请补充：${missing.join("、")}。`);
+      error.status = 400;
+      error.code = "SUBMISSION_INCOMPLETE";
+      error.details = { missingFields: missing };
+      throw error;
+    }
+    const now = new Date().toISOString();
+    const before = gameAuditSnapshot(game);
+    game.status = "submitted";
+    game.published = true;
+    game.firstSubmittedAt ||= now;
+    game.submittedAt = now;
+    game.withdrawnAt = "";
+    game.updatedAt = now;
+    game.revision = Number(game.revision || 1) + 1;
+    if (isAfterSubmissionDeadline(store.settings)) {
+      markLateSubmission(store, game, before.status === "withdrawn" ? "resubmitted_after_deadline" : "submitted_after_deadline", {
+        type: "participant",
+        id: record.session.id,
+        email: record.session.email
+      });
+    }
+    addAudit(store, {
+      action: before.status === "withdrawn" ? "game_resubmitted" : "game_submitted",
+      actorType: "participant",
+      actorId: record.session.id,
+      actorEmail: record.session.email,
+      gameId: id,
+      before,
+      after: gameAuditSnapshot(game)
+    });
+    return { game, access };
+  });
+  const store = await ensureStore();
+  return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: result.game.lateSubmission ? "作品已提交，并标记为补交。" : "作品已提交参展并立即公开。" });
+}
+
+async function handleParticipantWithdrawGame(req, res, id) {
+  const result = await mutateStore((store) => {
+    const record = requireParticipantSession(store, req);
+    const game = store.games.find((item) => item.id === id);
+    if (!game) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const access = participantRole(game, record.session.email);
+    if (!access || access.role !== "owner") {
+      const error = new Error("只有作品负责人可以撤回作品。");
+      error.status = 403;
+      throw error;
+    }
+    if (gameStatus(game) !== "submitted") {
+      const error = new Error("当前作品不在公开参展状态。");
+      error.status = 409;
+      throw error;
+    }
+    const now = new Date().toISOString();
+    const before = gameAuditSnapshot(game);
+    game.status = "withdrawn";
+    game.published = false;
+    game.withdrawnAt = now;
+    game.updatedAt = now;
+    game.revision = Number(game.revision || 1) + 1;
+    for (const ballot of store.ballots) {
+      if (!ballot.gameIds.includes(id)) continue;
+      const ballotBefore = [...ballot.gameIds];
+      ballot.gameIds = ballot.gameIds.filter((gameId) => gameId !== id);
+      ballot.version = Number(ballot.version || 1) + 1;
+      ballot.updatedAt = now;
+      addAudit(store, {
+        action: "ballot_invalidated_by_game_withdrawal",
+        actorType: "system",
+        actorId: "system",
+        gameId: id,
+        voterId: ballot.id,
+        voterEmail: ballot.email,
+        before: ballotBefore,
+        after: [...ballot.gameIds]
+      });
+    }
+    addAudit(store, {
+      action: "game_withdrawn",
+      actorType: "participant",
+      actorId: record.session.id,
+      actorEmail: record.session.email,
+      gameId: id,
+      before,
+      after: gameAuditSnapshot(game)
+    });
+    return { game, access };
+  });
+  const store = await ensureStore();
+  return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), ballot: ballotPayload(null), message: "作品已撤回，相关可能性核心已经归还给投票者。" });
+}
+
+async function handleParticipantAddMember(req, res, id) {
+  const body = await readJson(req);
+  const email = normalizeEmail(body.email);
+  const name = cleanText(body.name, 40);
+  const role = cleanText(body.role, 40);
+  if (!isValidEmail(email) || !name) return json(res, 400, { ok: false, error: "MEMBER_REQUIRED", message: "请填写队友姓名和有效邮箱。" });
+  const result = await mutateStore((store) => {
+    const record = requireParticipantSession(store, req);
+    const game = store.games.find((item) => item.id === id);
+    if (!game) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const access = participantRole(game, record.session.email);
+    if (!access || access.role !== "owner") {
+      const error = new Error("只有作品负责人可以管理队友。");
+      error.status = 403;
+      throw error;
+    }
+    if (email === normalizeEmail(game.ownerEmail)) {
+      const error = new Error("负责人邮箱不能重复添加为队友。");
+      error.status = 409;
+      throw error;
+    }
+    const occupied = participantGame(store, email);
+    if (occupied && occupied.game.id !== id) {
+      const error = new Error("该邮箱已经负责或加入另一款作品。");
+      error.status = 409;
+      error.code = "MEMBER_ALREADY_ASSIGNED";
+      throw error;
+    }
+    const members = normalizeTeamMembers(game.teamMembers);
+    if (members.filter((member) => member.active).length >= 11) {
+      const error = new Error("一款作品最多包含 12 位制作人员。");
+      error.status = 409;
+      throw error;
+    }
+    const existingMember = members.find((member) => member.email === email);
+    if (existingMember?.active) {
+      const error = new Error("该邮箱已经是当前队友。可在成员资料中修改姓名与职能。");
+      error.status = 409;
+      error.code = "MEMBER_ALREADY_ACTIVE";
+      throw error;
+    }
+    const creator = { id: existingMember?.creatorId || randomId(), name, role, avatarUrl: "", order: normalizeCreators(game.creators).length };
+    game.creators = [...normalizeCreators(game.creators).filter((item) => item.id !== creator.id), creator];
+    if (existingMember) {
+      const stored = game.teamMembers.find((member) => member.id === existingMember.id);
+      Object.assign(stored, { active: true, removedAt: "", creatorId: creator.id, addedAt: new Date().toISOString() });
+    } else {
+      game.teamMembers.push({ id: randomId(), email, creatorId: creator.id, active: true, addedAt: new Date().toISOString(), removedAt: "", firstLoginAt: "" });
+    }
+    game.historicalTeamEmails = [...new Set([...(game.historicalTeamEmails || []), email])];
+    game.updatedAt = new Date().toISOString();
+    game.revision = Number(game.revision || 1) + 1;
+    addAudit(store, {
+      action: existingMember ? "team_member_restored" : "team_member_added",
+      actorType: "participant",
+      actorId: record.session.id,
+      actorEmail: record.session.email,
+      gameId: id,
+      memberEmail: email,
+      after: { email, name, role, creatorId: creator.id }
+    });
+    return { game, access, ownerName: record.session.name };
+  });
+  const store = await ensureStore();
+  const loginUrl = `${requestOrigin(req)}/submit`;
+  try {
+    await deliverTeamInvitation({ email, name, eventTitle: store.settings.eventTitle, gameTitle: result.game.title, ownerName: result.ownerName, loginUrl });
+  } catch (error) {
+    await mutateStore((store) => addAudit(store, { action: "team_invitation_email_failed", actorType: "system", actorId: "system", gameId: id, memberEmail: email, reason: cleanText(error.message, 300) }));
+  }
+  return json(res, 201, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "队友权限已立即生效，通知邮件已安排发送。" });
+}
+
+async function handleParticipantRemoveMember(req, res, id, memberId) {
+  const result = await mutateStore((store) => {
+    const record = requireParticipantSession(store, req);
+    const game = store.games.find((item) => item.id === id);
+    if (!game) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const access = participantRole(game, record.session.email);
+    if (!access || access.role !== "owner") {
+      const error = new Error("只有作品负责人可以管理队友。");
+      error.status = 403;
+      throw error;
+    }
+    const member = game.teamMembers.find((item) => item.id === memberId && item.active !== false);
+    if (!member) {
+      const error = new Error("没有找到这位当前队友。");
+      error.status = 404;
+      throw error;
+    }
+    member.active = false;
+    member.removedAt = new Date().toISOString();
+    game.historicalTeamEmails = [...new Set([...(game.historicalTeamEmails || []), normalizeEmail(member.email)])];
+    const removedCreator = normalizeCreators(game.creators).find((creator) => creator.id === member.creatorId);
+    game.creators = normalizeCreators(game.creators).filter((creator) => creator.id !== member.creatorId);
+    game.updatedAt = member.removedAt;
+    game.revision = Number(game.revision || 1) + 1;
+    addAudit(store, {
+      action: "team_member_removed",
+      actorType: "participant",
+      actorId: record.session.id,
+      actorEmail: record.session.email,
+      gameId: id,
+      memberId,
+      memberEmail: member.email,
+      before: { ...member, creator: removedCreator },
+      after: { active: false, removedAt: member.removedAt }
+    });
+    return { game, access };
+  });
+  const store = await ensureStore();
+  return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "队友编辑权限已立即撤销。" });
+}
+
+async function handleParticipantProfile(req, res, id, memberId) {
+  const parsed = await parseGameMultipart(req);
+  try {
+    const result = await mutateStore((store) => {
+      const record = requireParticipantSession(store, req);
+      const game = store.games.find((item) => item.id === id);
+      if (!game) {
+        const error = new Error("没有找到这款作品。");
+        error.status = 404;
+        throw error;
+      }
+      const access = participantRole(game, record.session.email);
+      if (!access) {
+        const error = new Error("权限已变更，你已不能修改这款作品。");
+        error.status = 403;
+        error.code = "PARTICIPANT_PERMISSION_CHANGED";
+        throw error;
+      }
+      let creatorId = "";
+      let targetMember = null;
+      if (memberId === "owner") {
+        if (access.role !== "owner") {
+          const error = new Error("你只能修改自己的制作人员资料。");
+          error.status = 403;
+          throw error;
+        }
+        creatorId = game.ownerCreatorId;
+      } else {
+        targetMember = game.teamMembers.find((member) => member.id === memberId && member.active !== false);
+        if (!targetMember || (access.role !== "owner" && access.member?.id !== targetMember.id)) {
+          const error = new Error("你只能修改自己的制作人员资料。");
+          error.status = 403;
+          throw error;
+        }
+        creatorId = targetMember.creatorId;
+      }
+      const creators = normalizeCreators(game.creators);
+      const index = creators.findIndex((creator) => creator.id === creatorId);
+      const previous = index >= 0 ? creators[index] : { id: creatorId || randomId(), name: record.session.name, role: memberId === "owner" ? "负责人" : "", avatarUrl: "", order: creators.length };
+      const next = {
+        ...previous,
+        name: cleanText(parsed.fields.name, 40) || previous.name,
+        role: cleanText(parsed.fields.role, 40),
+        avatarUrl: parsed.files.profileAvatar?.url || previous.avatarUrl
+      };
+      if (index >= 0) creators[index] = next;
+      else creators.push(next);
+      game.creators = creators;
+      if (memberId === "owner") game.ownerCreatorId = next.id;
+      else targetMember.creatorId = next.id;
+      if (parsed.files.profileAvatar) {
+        game.assetHistory = Array.isArray(game.assetHistory) ? game.assetHistory : [];
+        game.assetMeta = game.assetMeta && typeof game.assetMeta === "object" ? game.assetMeta : {};
+        if (previous.avatarUrl) game.assetHistory.push({ kind: "avatar", url: previous.avatarUrl, creatorId: next.id, replacedAt: new Date().toISOString() });
+        game.assetMeta.avatars ||= {};
+        game.assetMeta.avatars[next.id] = fileAssetMeta(parsed.files.profileAvatar, record.session.email);
+      }
+      game.updatedAt = new Date().toISOString();
+      game.revision = Number(game.revision || 1) + 1;
+      addAudit(store, {
+        action: "creator_profile_updated",
+        actorType: "participant",
+        actorId: record.session.id,
+        actorEmail: record.session.email,
+        gameId: id,
+        memberId,
+        before: previous,
+        after: next
+      });
+      return { game, access };
+    });
+    const store = await ensureStore();
+    return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "制作人员资料已更新。" });
+  } catch (error) {
+    await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
+    throw error;
+  }
 }
 
 async function handleAdminSession(req, res, url) {
@@ -1317,8 +2088,14 @@ async function handleAdminCreateGame(req, res, url) {
     const game = gameFromFields(parsed.fields, parsed.files);
     await mutateStore((store) => {
       if (game.featured) store.games.forEach((item) => { item.featured = false; });
+      game.status = game.published ? "submitted" : "draft";
+      if (game.status === "submitted") {
+        game.firstSubmittedAt = game.createdAt;
+        game.submittedAt = game.createdAt;
+      }
       game.coordinate = coordinateForGame(game.id, store.settings.eventSeed, store.games);
       store.games.push(game);
+      addAudit(store, { action: "game_created", actorType: "admin", actorId: "admin", gameId: game.id, after: gameAuditSnapshot(game) });
     });
     return json(res, 201, { ok: true, game, message: "游戏已加入展厅。" });
   } catch (error) {
@@ -1330,7 +2107,6 @@ async function handleAdminCreateGame(req, res, url) {
 async function handleAdminUpdateGame(req, res, url, id) {
   if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
   const parsed = await parseGameMultipart(req);
-  let oldAssets = [];
   try {
     const updated = await mutateStore((store) => {
       const index = store.games.findIndex((game) => game.id === id);
@@ -1340,18 +2116,22 @@ async function handleAdminUpdateGame(req, res, url, id) {
         throw error;
       }
       const existing = store.games[index];
+      const before = gameAuditSnapshot(existing);
       const game = gameFromFields(parsed.fields, parsed.files, existing);
-      const retainedAvatars = new Set(game.creators.map((creator) => creator.avatarUrl).filter(Boolean));
-      oldAssets = [
-        parsed.files.cover ? existing.coverUrl : "",
-        parsed.files.video ? existing.videoUrl : "",
-        ...normalizeCreators(existing.creators).map((creator) => creator.avatarUrl).filter((urlValue) => urlValue && !retainedAvatars.has(urlValue))
-      ].filter(Boolean);
+      game.status = game.published ? "submitted" : gameStatus(existing) === "withdrawn" ? "withdrawn" : "draft";
+      if (game.status === "submitted") {
+        game.firstSubmittedAt ||= new Date().toISOString();
+        game.submittedAt ||= game.firstSubmittedAt;
+      }
+      scheduleReplacedAssets(store, existing, game, parsed.files, "");
+      if (cleanUrl(existing.downloadUrl) !== cleanUrl(game.downloadUrl)) {
+        game.downloadHistory = [...(existing.downloadHistory || []), { id: randomId(), before: cleanUrl(existing.downloadUrl), after: cleanUrl(game.downloadUrl), actorEmail: "", actorType: "admin", createdAt: new Date().toISOString() }];
+      }
       if (game.featured) store.games.forEach((item) => { item.featured = false; });
       store.games[index] = game;
+      addAudit(store, { action: "game_updated", actorType: "admin", actorId: "admin", gameId: id, before, after: gameAuditSnapshot(game), changes: changedGameFields(before, gameAuditSnapshot(game)) });
       return game;
     });
-    await Promise.all(oldAssets.map(removeLocalAsset));
     return json(res, 200, { ok: true, game: updated, message: "游戏信息已更新。" });
   } catch (error) {
     await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
@@ -1361,23 +2141,7 @@ async function handleAdminUpdateGame(req, res, url, id) {
 
 async function handleAdminDeleteGame(req, res, url, id) {
   if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
-  const deleted = await mutateStore((store) => {
-    const game = store.games.find((item) => item.id === id);
-    if (!game) {
-      const error = new Error("没有找到这款游戏。" );
-      error.status = 404;
-      throw error;
-    }
-    store.games = store.games.filter((item) => item.id !== id);
-    store.ballots.forEach((ballot) => { ballot.gameIds = ballot.gameIds.filter((gameId) => gameId !== id); });
-    return game;
-  });
-  await Promise.all([
-    removeLocalAsset(deleted.coverUrl),
-    removeLocalAsset(deleted.videoUrl),
-    ...normalizeCreators(deleted.creators).map((creator) => removeLocalAsset(creator.avatarUrl))
-  ]);
-  return json(res, 200, { ok: true, message: "游戏已删除。" });
+  return json(res, 409, { ok: false, error: "PHYSICAL_DELETE_DISABLED", message: "作品禁止物理删除，请使用撤回流程并保留审计记录。" });
 }
 
 async function handleAdminRegeneratePlanet(req, res, url, id) {
@@ -1412,10 +2176,12 @@ async function handleAdminSettings(req, res, url) {
   const body = await readJson(req);
   const startAt = new Date(body.startAt);
   const endAt = new Date(body.endAt);
-  if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
+  const submissionEndAt = new Date(body.submissionEndAt);
+  if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || !Number.isFinite(submissionEndAt.getTime()) || endAt <= startAt) {
     return json(res, 400, { ok: false, error: "INVALID_TIME", message: "请设置正确的开始与结束时间。" });
   }
   const settings = await mutateStore((store) => {
+    const before = { ...store.settings };
     store.settings = {
       ...store.settings,
       eventTitle: cleanText(body.eventTitle, 80) || store.settings.eventTitle,
@@ -1423,11 +2189,106 @@ async function handleAdminSettings(req, res, url) {
       slogan: cleanText(body.slogan, 80) || store.settings.slogan,
       eventSeed: cleanText(body.eventSeed, 80) || store.settings.eventSeed,
       startAt: startAt.toISOString(),
-      endAt: endAt.toISOString()
+      endAt: endAt.toISOString(),
+      submissionEndAt: submissionEndAt.toISOString()
     };
+    addAudit(store, { action: "settings_updated", actorType: "admin", actorId: "admin", before, after: { ...store.settings } });
     return store.settings;
   });
   return json(res, 200, { ok: true, settings, message: "活动设置已保存。" });
+}
+
+async function handleAdminBindOwner(req, res, url, id) {
+  if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
+  const body = await readJson(req);
+  const email = normalizeEmail(body.email);
+  if (!isValidEmail(email)) return json(res, 400, { ok: false, error: "OWNER_EMAIL_REQUIRED", message: "请填写有效的负责人邮箱。" });
+  const game = await mutateStore((store) => {
+    const target = store.games.find((item) => item.id === id);
+    if (!target) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const occupied = participantGame(store, email);
+    if (occupied && occupied.game.id !== id) {
+      const error = new Error("该邮箱已经负责或加入另一款作品。");
+      error.status = 409;
+      error.code = "OWNER_ALREADY_ASSIGNED";
+      throw error;
+    }
+    const before = { ownerEmail: normalizeEmail(target.ownerEmail), ownerCreatorId: target.ownerCreatorId || "" };
+    if (before.ownerEmail && before.ownerEmail !== email) target.historicalOwnerEmails = [...new Set([...(target.historicalOwnerEmails || []), before.ownerEmail])];
+    target.ownerEmail = email;
+    target.historicalOwnerEmails = [...new Set([...(target.historicalOwnerEmails || []), email])];
+    const member = target.teamMembers.find((item) => item.active !== false && normalizeEmail(item.email) === email);
+    if (member) {
+      target.ownerCreatorId = member.creatorId || target.ownerCreatorId;
+      member.active = false;
+      member.removedAt = new Date().toISOString();
+      target.historicalTeamEmails = [...new Set([...(target.historicalTeamEmails || []), email])];
+    }
+    target.updatedAt = new Date().toISOString();
+    target.revision = Number(target.revision || 1) + 1;
+    addAudit(store, {
+      action: "game_owner_bound",
+      actorType: "admin",
+      actorId: "admin",
+      gameId: id,
+      before,
+      after: { ownerEmail: email, ownerCreatorId: target.ownerCreatorId || "" }
+    });
+    return { ...target };
+  });
+  return json(res, 200, { ok: true, game, message: "负责人邮箱已绑定并立即生效。" });
+}
+
+async function handleAdminClearLate(req, res, url, id) {
+  if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
+  const body = await readJson(req);
+  const reason = cleanText(body.reason, 500);
+  if (!reason) return json(res, 400, { ok: false, error: "REASON_REQUIRED", message: "请填写撤销补交标记的复核原因。" });
+  const game = await mutateStore((store) => {
+    const target = store.games.find((item) => item.id === id);
+    if (!target) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const before = { lateSubmission: Boolean(target.lateSubmission), lateMarkedAt: target.lateMarkedAt || "" };
+    target.lateSubmission = false;
+    target.lateClearedAt = new Date().toISOString();
+    target.lateClearedReason = reason;
+    target.updatedAt = target.lateClearedAt;
+    target.revision = Number(target.revision || 1) + 1;
+    addAudit(store, {
+      action: "game_late_marker_cleared",
+      actorType: "admin",
+      actorId: "admin",
+      gameId: id,
+      reason,
+      before,
+      after: { lateSubmission: false, lateClearedAt: target.lateClearedAt }
+    });
+    return { ...target };
+  });
+  return json(res, 200, { ok: true, game, message: "补交标记已撤销。后续截止后修改下载地址仍会重新触发。" });
+}
+
+async function handleAdminAudit(req, res, url) {
+  if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
+  const store = await ensureStore();
+  const gameId = cleanText(url.searchParams.get("gameId"), 100);
+  const actorEmail = normalizeEmail(url.searchParams.get("email"));
+  const action = cleanText(url.searchParams.get("action"), 100);
+  const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get("limit") || 500)));
+  const audit = store.audit.filter((item) => {
+    if (gameId && item.gameId !== gameId) return false;
+    if (actorEmail && ![item.actorEmail, item.voterEmail, item.memberEmail].map(normalizeEmail).includes(actorEmail)) return false;
+    if (action && item.action !== action) return false;
+    return true;
+  }).slice(-limit).reverse();
+  return json(res, 200, { ok: true, audit, total: audit.length });
 }
 
 async function handleAdminDeleteVoter(req, res, url, id) {
@@ -1475,8 +2336,8 @@ async function handleAdminAdjudicate(req, res, url) {
   if (winnerIds.length !== 2) return json(res, 400, { ok: false, error: "TWO_WINNERS_REQUIRED", message: "必须选择两款同等级获奖作品。" });
   if (!note) return json(res, 400, { ok: false, error: "ADJUDICATION_NOTE_REQUIRED", message: "请填写同票裁定说明。" });
   const result = await mutateStore((store) => {
-    if (votingState(store.settings) !== "locked") {
-      const error = new Error("只能在投票截止且结果未发布时进行裁定。" );
+    if (store.settings.resultsPublished) {
+      const error = new Error("结果已经发布。如需重新裁定，请先撤回宇宙点亮。" );
       error.status = 409;
       throw error;
     }
@@ -1516,8 +2377,8 @@ async function handleAdminAdjudicate(req, res, url) {
 async function handleAdminPublishResults(req, res, url) {
   if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
   const result = await mutateStore((store) => {
-    if (votingState(store.settings) !== "locked") {
-      const error = new Error(store.settings.resultsPublished ? "结果已经发布。" : "投票截止后才能发布结果。" );
+    if (store.settings.resultsPublished) {
+      const error = new Error("结果已经发布。" );
       error.status = 409;
       throw error;
     }
@@ -1703,6 +2564,7 @@ async function serveStatic(req, res, url) {
     return serveFile(res, requested, { range: req.headers.range });
   }
   const adminHost = isAdminHost(req);
+  if (pathname === "/submit" || pathname === "/submit/") pathname = "/submit.html";
   if (pathname === "/") pathname = adminHost && ADMIN_ROOT_ON_ADMIN_HOST ? "/admin.html" : "/index.html";
   if (pathname === "/admin" || pathname === "/admin.html") {
     if (!adminSurfaceAllowed(req)) return notFound(res);
@@ -1743,6 +2605,42 @@ async function router(req, res) {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleVote(req, res);
     }
+    if (url.pathname === "/api/participant/workspace") {
+      if (req.method !== "GET") return methodNotAllowed(res);
+      return await handleParticipantWorkspace(req, res);
+    }
+    if (url.pathname === "/api/participant/games") {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantCreateGame(req, res);
+    }
+    const participantSubmitMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/submit$/);
+    if (participantSubmitMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantSubmitGame(req, res, decodeURIComponent(participantSubmitMatch[1]));
+    }
+    const participantWithdrawMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/withdraw$/);
+    if (participantWithdrawMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantWithdrawGame(req, res, decodeURIComponent(participantWithdrawMatch[1]));
+    }
+    const participantMembersMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/members$/);
+    if (participantMembersMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantAddMember(req, res, decodeURIComponent(participantMembersMatch[1]));
+    }
+    const participantMemberMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/members\/([^/]+)$/);
+    if (participantMemberMatch) {
+      const gameId = decodeURIComponent(participantMemberMatch[1]);
+      const memberId = decodeURIComponent(participantMemberMatch[2]);
+      if (req.method === "PUT") return await handleParticipantProfile(req, res, gameId, memberId);
+      if (req.method === "DELETE") return await handleParticipantRemoveMember(req, res, gameId, memberId);
+      return methodNotAllowed(res);
+    }
+    const participantGameMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)$/);
+    if (participantGameMatch) {
+      if (req.method !== "PUT") return methodNotAllowed(res);
+      return await handleParticipantUpdateGame(req, res, decodeURIComponent(participantGameMatch[1]));
+    }
     if (url.pathname === "/api/admin/session") {
       if (req.method !== "POST" && req.method !== "GET") return methodNotAllowed(res);
       return await handleAdminSession(req, res, url);
@@ -1766,6 +2664,16 @@ async function router(req, res) {
     if (regenerateGameMatch) {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleAdminRegeneratePlanet(req, res, url, decodeURIComponent(regenerateGameMatch[1]));
+    }
+    const bindOwnerMatch = url.pathname.match(/^\/api\/admin\/games\/([^/]+)\/owner$/);
+    if (bindOwnerMatch) {
+      if (req.method !== "PUT") return methodNotAllowed(res);
+      return await handleAdminBindOwner(req, res, url, decodeURIComponent(bindOwnerMatch[1]));
+    }
+    const clearLateMatch = url.pathname.match(/^\/api\/admin\/games\/([^/]+)\/late$/);
+    if (clearLateMatch) {
+      if (req.method !== "DELETE") return methodNotAllowed(res);
+      return await handleAdminClearLate(req, res, url, decodeURIComponent(clearLateMatch[1]));
     }
     if (url.pathname === "/api/admin/settings") {
       if (req.method !== "PUT") return methodNotAllowed(res);
@@ -1795,6 +2703,10 @@ async function router(req, res) {
     if (url.pathname === "/api/admin/export/audit.csv") {
       if (req.method !== "GET") return methodNotAllowed(res);
       return await handleAdminAuditExport(req, res, url);
+    }
+    if (url.pathname === "/api/admin/audit") {
+      if (req.method !== "GET") return methodNotAllowed(res);
+      return await handleAdminAudit(req, res, url);
     }
     if (req.method !== "GET" && req.method !== "HEAD") return methodNotAllowed(res);
     return await serveStatic(req, res, url);

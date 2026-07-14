@@ -919,6 +919,7 @@ function updateTargetConsole(snapshot = state.targetProximity) {
   $("#targetSignal").textContent = copy.signal;
   $("#targetHint").textContent = copy.hint;
   $("#targetUnknown").textContent = ["identity", "source"].includes(level) || state.resolved.has(game.id) || state.site?.resultsVisible ? game.title : (level === "spectrum" ? (game.tags || [])[0] || "类型待解析" : "未知作品");
+  $("#targetLateBadge").hidden = !game.lateSubmission || !["identity", "source"].includes(level);
   $("#proximityLabel").textContent = copy.label;
   $("#signalScale").dataset.level = level;
   $("#signalScale").style.setProperty("--signal-strength", String(snapshot?.signal || 0));
@@ -942,6 +943,31 @@ function coordinateLabel(game) {
 
 function isDirectVideo(url) {
   return Boolean(url) && (/^\/uploads\//.test(url) || /\.(mp4|webm|mov)(\?|$)/i.test(url));
+}
+
+function videoEmbedUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(value, location.href);
+    const host = url.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") {
+      const id = url.pathname.split("/").filter(Boolean)[0];
+      return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0` : "";
+    }
+    if (host.endsWith("youtube.com")) {
+      const id = url.searchParams.get("v") || url.pathname.match(/\/(?:embed|shorts)\/([^/?]+)/)?.[1];
+      return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0` : "";
+    }
+    if (host.endsWith("bilibili.com")) {
+      const bvid = url.pathname.match(/\/video\/(BV[\w]+)/i)?.[1];
+      return bvid ? `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&high_quality=1&autoplay=0` : "";
+    }
+    if (host.endsWith("v.qq.com")) {
+      const vid = url.searchParams.get("vid") || url.pathname.match(/\/([A-Za-z0-9]+)\.html$/)?.[1];
+      return vid ? `https://v.qq.com/txp/iframe/player.html?vid=${encodeURIComponent(vid)}&auto=0` : "";
+    }
+  } catch {}
+  return "";
 }
 
 function updatePreviewVideo() {
@@ -1526,6 +1552,7 @@ function updateRouteArrival(game, proximity) {
   state.routeArrived = true;
   state.routePaused = true;
   $("#routeProgress").textContent = "已抵达未知行星，等待穿越";
+  $("#routeLateBadge").hidden = !game.lateSubmission;
   $("#routePause").textContent = "查看游戏";
   updateExplorationUI();
 }
@@ -1598,8 +1625,7 @@ function startCreatorOrbit() {
 
 function isSelfGame(game) {
   if (!state.session.authenticated) return false;
-  const voter = normalizeName(state.session.identity?.name);
-  return (game.creators || []).some((creator) => normalizeName(creator.name) === voter);
+  return (state.session.selfBlockedGameIds || []).includes(game.id);
 }
 
 function updateDetailVoteButton() {
@@ -1632,16 +1658,21 @@ function populateDetail(game) {
   $("#detailShort").textContent = game.shortDescription || "";
   $("#detailDescription").textContent = game.description || game.shortDescription || "游戏简介暂未填写。";
   $("#detailCreationNote").textContent = game.creationNote || "创作手记暂未填写。";
+  $("#detailLateBadge").hidden = !game.lateSubmission;
   $("#creationNoteSection").hidden = !game.creationNote;
   $("#detailTags").innerHTML = (game.tags || []).map((tag) => `<span>${escapeHTML(tag)}</span>`).join("");
 
   const cover = $("#detailCover");
   const video = $("#detailVideo");
+  const embed = $("#detailVideoEmbed");
+  const embedUrl = videoEmbedUrl(game.videoUrl);
   cover.src = game.coverUrl || "/assets/pass-texture.png";
   cover.alt = `${game.title}游戏封面`;
   video.pause();
   video.removeAttribute("src");
   video.hidden = true;
+  embed.removeAttribute("src");
+  embed.hidden = true;
   cover.hidden = false;
   if (isDirectVideo(game.videoUrl)) {
     video.src = game.videoUrl;
@@ -1649,9 +1680,13 @@ function populateDetail(game) {
     video.loop = true;
     video.hidden = false;
     cover.hidden = true;
+  } else if (embedUrl) {
+    embed.src = embedUrl;
+    embed.hidden = false;
+    cover.hidden = true;
   }
   const videoLink = $("#detailVideoLink");
-  videoLink.hidden = !game.videoUrl || isDirectVideo(game.videoUrl);
+  videoLink.hidden = !game.videoUrl || isDirectVideo(game.videoUrl) || Boolean(embedUrl);
   if (!videoLink.hidden) videoLink.href = game.videoUrl;
   const download = $("#detailDownload");
   download.hidden = !game.downloadUrl;
@@ -1717,6 +1752,7 @@ function closeDetail() {
   state.landing = true;
   stopCreatorOrbit();
   $("#detailVideo").pause();
+  $("#detailVideoEmbed").removeAttribute("src");
   const landing = $("#landingTransition");
   $("#landingImage").src = game?.coverUrl || "/assets/pass-texture.png";
   $("#landingStatus").textContent = "正在返回观测轨道";
@@ -1779,7 +1815,7 @@ function renderSearch(query = "") {
   $("#searchResults").innerHTML = games.length ? games.map((game) => `
     <button class="search-result" type="button" data-search-id="${escapeHTML(game.id)}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
-      <div><strong>${escapeHTML(game.title)}</strong><span>${escapeHTML(game.team)}</span></div>
+      <div><strong>${escapeHTML(game.title)}${game.lateSubmission ? ` <small class="late-badge">补交</small>` : ""}</strong><span>${escapeHTML(game.team)}</span></div>
       <code>${escapeHTML(coordinateLabel(game))}</code>
     </button>
   `).join("") : `<p class="dialog-intro">没有找到匹配作品。</p>`;
@@ -1842,6 +1878,7 @@ function advanceRoute() {
   setTarget(id);
   navigateToGame(id, 1.58);
   $("#routeProgress").textContent = `${routePositionLabel()}，正在接近`;
+  $("#routeLateBadge").hidden = !state.gameById.get(id)?.lateSubmission;
   $("#routePause").textContent = "暂停";
   writeLocalState();
 }
@@ -1967,7 +2004,7 @@ async function verifyAuth(event) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...identity, code })
     });
-    state.session = { authenticated: true, identity: result.identity };
+    state.session = { authenticated: true, identity: result.identity, selfBlockedGameIds: result.selfBlockedGameIds || [] };
     state.ballot = result.ballot || { gameIds: [], version: 0 };
     saveProfile(identity);
     closeDialog($("#authDialog"));
@@ -1994,7 +2031,7 @@ async function logout() {
   try {
     await fetchJSON("/api/session", { method: "DELETE" });
   } catch {}
-  state.session = { authenticated: false, identity: null };
+  state.session = { authenticated: false, identity: null, selfBlockedGameIds: [] };
   state.ballot = { gameIds: [], version: 0, updatedAt: null };
   state.pendingReplacementId = "";
   state.pendingBallotRetry = null;
@@ -2630,7 +2667,7 @@ async function submitRitualOperation({ addGameId = "", removeGameId = "", mode =
     state.ritualOperationId = "";
     if (error.code === "LOGIN_REQUIRED") {
       const pendingGameId = state.ritualGameId;
-      state.session = { authenticated: false, identity: null };
+      state.session = { authenticated: false, identity: null, selfBlockedGameIds: [] };
       finishClosingCeremony();
       openAuth(pendingGameId);
       return false;
@@ -2766,7 +2803,7 @@ async function updateBallot(gameIds) {
     return true;
   } catch (error) {
     if (error.code === "LOGIN_REQUIRED") {
-      state.session = { authenticated: false, identity: null };
+      state.session = { authenticated: false, identity: null, selfBlockedGameIds: [] };
       updateAccountUI();
       openAuth();
     }
@@ -2901,7 +2938,7 @@ function renderAccessibleIndex() {
     return `
     <button type="button" data-accessible-game="${escapeHTML(game.id)}" aria-label="${escapeHTML(known ? `${game.title}，${game.team}，坐标 ${coordinateLabel(game)}` : `未知作品，坐标 ${coordinateLabel(game)}`)}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
-      <span><strong>${escapeHTML(known ? game.title : "未知作品")}</strong><small>${escapeHTML(known ? game.team : "尚未完成身份解析")}</small></span>
+      <span><strong>${escapeHTML(known ? game.title : "未知作品")}${known && game.lateSubmission ? ` <em class="late-badge">补交</em>` : ""}</strong><small>${escapeHTML(known ? game.team : "尚未完成身份解析")}</small></span>
       <code>${escapeHTML(coordinateLabel(game))}</code>
     </button>
   `;
@@ -3316,7 +3353,9 @@ async function loadApplication() {
     state.site = site;
     state.games = site.games || [];
     state.gameById = new Map(state.games.map((game) => [game.id, game]));
-    state.session = session.authenticated ? { authenticated: true, identity: session.identity } : { authenticated: false, identity: null };
+    state.session = session.authenticated
+      ? { authenticated: true, identity: session.identity, selfBlockedGameIds: session.selfBlockedGameIds || [] }
+      : { authenticated: false, identity: null, selfBlockedGameIds: [] };
     state.ballot = session.ballot || { gameIds: [], version: 0, updatedAt: null };
     state.games.forEach(coverImage);
     initializeLocalState();

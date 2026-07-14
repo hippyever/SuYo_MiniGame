@@ -11,7 +11,7 @@
     <meta property="og:image" content="/assets/suyo-studio.png" />
     <title>溯造 MiniGame 游戏开发大赛</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/observatory.css?v=20260714q" />
+    <link rel="stylesheet" href="/observatory.css?v=20260714s" />
   </head>
   <body class="observatory-body">
     <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
@@ -33,6 +33,7 @@
           <time id="deadlineLabel"></time>
         </div>
         <div class="account-actions">
+          <a class="plain-action participant-entry" href="/submit">提交参展</a>
           <button class="plain-action" id="loginButton" type="button">登录</button>
           <button class="primary-action compact" id="ballotButton" type="button">我的投票 <span id="ballotCount">0/3</span></button>
         </div>
@@ -52,7 +53,7 @@
         </div>
         <div class="target-copy">
           <p id="targetHint">玩法画面正在显现</p>
-          <strong id="targetUnknown">未知作品</strong>
+          <strong id="targetUnknown">未知作品</strong><span class="late-badge" id="targetLateBadge" hidden>补交</span>
         </div>
         <div class="signal-scale" id="signalScale" aria-label="观测距离">
           <i></i><i></i><i></i><i></i><i></i>
@@ -65,6 +66,7 @@
         <div>
           <span>自动浏览全部作品</span>
           <strong id="routeProgress">准备中</strong>
+          <small class="late-badge" id="routeLateBadge" hidden>补交作品</small>
         </div>
         <button class="plain-action" id="routePause" type="button">暂停</button>
         <button class="plain-action" id="routeSkip" type="button">下一个</button>
@@ -119,6 +121,7 @@
           <span id="launchLabel">正在建立观测连接</span>
           <b aria-hidden="true"></b>
         </button>
+        <a class="poster-submit" href="/submit">参赛者工作台 / 提交作品</a>
       </div>
       <div class="poster-facts" aria-label="赛事信息">
         <div><span>参展作品</span><strong id="posterGameCount">--</strong></div>
@@ -148,6 +151,7 @@
       <div class="detail-media-stage">
         <img id="detailCover" src="" alt="" />
         <video id="detailVideo" controls muted playsinline preload="metadata" hidden></video>
+        <iframe id="detailVideoEmbed" title="游戏演示视频" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen hidden></iframe>
         <div class="detail-media-shade" aria-hidden="true"></div>
       </div>
       <header class="detail-topbar">
@@ -157,6 +161,7 @@
       </header>
       <div class="detail-content">
         <div class="detail-title-block">
+          <p class="late-badge detail-late" id="detailLateBadge" hidden>补交作品</p>
           <h2 id="detailTitle"></h2>
           <p id="detailShort"></p>
         </div>
@@ -335,6 +340,6 @@
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
     <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
-    <script src="/app.js?v=20260714p" defer></script>
+    <script src="/app.js?v=20260714s" defer></script>
   </body>
 </html>

@@ -246,6 +246,27 @@ canvas:focus-visible {
   gap: 8px;
 }
 
+.participant-entry {
+  text-decoration: none;
+}
+
+.late-badge {
+  width: max-content;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid currentColor;
+  padding: 3px 7px;
+  color: #f1b37a;
+  background: color-mix(in srgb, #d65c31 14%, transparent);
+  font: 760 0.62rem/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+}
+
+.late-badge[hidden] {
+  display: none;
+}
+
 .plain-action,
 .primary-action,
 .secondary-action,
@@ -462,6 +483,10 @@ canvas:focus-visible {
 
 .route-console strong {
   font-size: 0.78rem;
+}
+
+.route-console .late-badge {
+  margin-top: 2px;
 }
 
 .result-console {
@@ -858,6 +883,20 @@ canvas:focus-visible {
   transform: translateX(3px);
 }
 
+.poster-submit {
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 6px 0;
+  color: var(--muted);
+  font: 700 0.72rem/1.4 var(--font-mono);
+  text-decoration: none;
+}
+
+.poster-submit:hover {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
 .poster-facts {
   position: absolute;
   right: 24px;
@@ -1138,9 +1177,11 @@ canvas:focus-visible {
 }
 
 .detail-media-stage img,
-.detail-media-stage video {
+.detail-media-stage video,
+.detail-media-stage iframe {
   width: 100%;
   height: 100%;
+  border: 0;
   object-fit: cover;
 }
 
@@ -1193,6 +1234,10 @@ canvas:focus-visible {
 .detail-title-block {
   display: grid;
   gap: 14px;
+}
+
+.detail-title-block .detail-late {
+  color: #f1b37a;
 }
 
 .detail-title-block > p:first-child {
@@ -1553,6 +1598,14 @@ canvas:focus-visible {
 .search-result code {
   color: var(--muted);
   font: 600 0.7rem/1.3 var(--font-mono);
+}
+
+.search-result strong .late-badge,
+.canvas-fallback #accessibleGameList .late-badge {
+  margin-left: 6px;
+  padding: 2px 5px;
+  font-size: 0.54rem;
+  font-style: normal;
 }
 
 .dialog-intro {
@@ -2619,6 +2672,17 @@ canvas:focus-visible {
 
   .account-actions {
     gap: 5px;
+  }
+
+  .participant-entry {
+    min-height: 40px;
+    padding-inline: 9px;
+    font-size: 0;
+  }
+
+  .participant-entry::after {
+    content: "参展";
+    font-size: 0.72rem;
   }
 
   .account-actions .compact {

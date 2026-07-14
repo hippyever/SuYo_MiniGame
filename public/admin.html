@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>溯造 MiniGame | 轨道控制台</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/styles.css?v=20260714g" />
+    <link rel="stylesheet" href="/styles.css?v=20260714s" />
   </head>
   <body class="admin-body">
     <main class="admin-login" id="adminLogin">
@@ -40,6 +40,7 @@
           <a href="#settingsAdmin">活动</a>
           <a href="#ballotsAdmin">选票</a>
           <a href="#resultsAdmin">点亮</a>
+          <a href="#auditAdmin">审计</a>
         </nav>
         <div class="admin-top-actions">
           <a class="button button-outline" href="/" target="_blank" rel="noreferrer">查看星图</a>
@@ -79,7 +80,7 @@
                 <label class="admin-field field-wide"><span>游戏简介</span><textarea name="description" rows="5" maxlength="1200"></textarea></label>
                 <label class="admin-field field-wide"><span>创作手记</span><textarea name="creationNote" rows="5" maxlength="600" placeholder="记录灵感来源、取舍和这次 48 小时旅程"></textarea></label>
                 <div class="creator-editor field-wide">
-                  <div class="creator-editor-head"><div><strong>制作人员卫星</strong><span>姓名用于自投匹配，修改后需要复核已有选票；最多 12 人</span></div><button class="text-action" id="addCreator" type="button">添加成员</button></div>
+                  <div class="creator-editor-head"><div><strong>制作人员卫星</strong><span>参赛者权限与自投限制以邮箱为准；最多 12 人</span></div><button class="text-action" id="addCreator" type="button">添加成员</button></div>
                   <div class="creator-rows" id="creatorRows"></div>
                 </div>
                 <label class="admin-field"><span>标签</span><input name="tags" maxlength="120" placeholder="解谜，叙事，动作" /></label>
@@ -91,7 +92,7 @@
                 </section>
                 <label class="admin-field"><span>下载地址</span><input name="downloadUrl" type="url" placeholder="https://" /></label>
                 <label class="admin-field"><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
-                <label class="admin-field"><span>外部演示地址</span><input name="videoUrl" type="url" placeholder="https://" /></label>
+                <label class="admin-field"><span>公开演示地址</span><input name="videoExternalUrl" type="url" placeholder="直链或哔哩哔哩、腾讯视频、YouTube 页面" /></label>
                 <label class="admin-field"><span>本地封面</span><input name="cover" type="file" accept="image/*" /></label>
                 <label class="admin-field field-wide"><span>本地演示视频</span><input name="video" type="file" accept="video/*" /></label>
               </div>
@@ -115,10 +116,11 @@
             <label class="admin-field"><span>活动名称</span><input name="eventTitle" maxlength="80" required /></label>
             <label class="admin-field"><span>Game Jam 主题</span><input name="theme" maxlength="40" required /></label>
             <label class="admin-field field-wide"><span>活动标语</span><input name="slogan" maxlength="80" required /></label>
-            <label class="admin-field"><span>投票开始</span><input name="startAt" type="datetime-local" required /></label>
-            <label class="admin-field"><span>投票结束</span><input name="endAt" type="datetime-local" required /></label>
+            <label class="admin-field"><span>参展提交截止</span><input name="submissionEndAt" type="datetime-local" step="1" required /></label>
+            <label class="admin-field"><span>投票开始</span><input name="startAt" type="datetime-local" step="1" required /></label>
+            <label class="admin-field"><span>投票结束</span><input name="endAt" type="datetime-local" step="1" required /></label>
             <label class="admin-field field-wide"><span>星图种子</span><input name="eventSeed" maxlength="80" placeholder="用于固定所有作品的宇宙坐标" /></label>
-            <div class="settings-notice field-wide"><strong>结果发布规则</strong><span>投票截止后进入锁票态。完成违规票复核与同票裁定后，管理员在“宇宙点亮”区域手动发布。</span></div>
+            <div class="settings-notice field-wide"><strong>三个时间彼此独立</strong><span>参展截止只判断补交，投票截止只锁定选票。宇宙点亮没有预设时间，由管理员完成复核后手动触发；一旦点亮也会立即停止投票。</span></div>
             <button class="button button-solid" type="submit">保存活动设置</button>
             <p class="form-message" id="settingsMessage" role="status"></p>
           </form>
@@ -142,13 +144,20 @@
         </section>
 
         <section class="admin-block" id="auditAdmin">
-          <div class="admin-block-head"><div><h2>最近审计记录</h2><p>保存选票修改、管理员复核、裁定与发布行为。</p></div></div>
+          <div class="admin-block-head">
+            <div><h2>完整审计记录</h2><p>永久查询作品修改、成员权限、素材元数据、下载地址前后值、选票与管理员操作。</p></div>
+            <form class="admin-block-actions" id="auditFilterForm">
+              <label class="admin-search"><span>作品</span><select id="auditGameFilter" name="gameId"><option value="">全部作品</option></select></label>
+              <label class="admin-search"><span>邮箱</span><input name="email" type="email" placeholder="参与者邮箱" /></label>
+              <button class="button button-outline" type="submit">查询审计</button>
+            </form>
+          </div>
           <div class="audit-list" id="auditList"></div>
         </section>
       </main>
     </div>
 
     <div class="toast" id="adminToast" role="status" hidden></div>
-    <script src="/admin.js?v=20260714g" defer></script>
+    <script src="/admin.js?v=20260714s" defer></script>
   </body>
 </html>

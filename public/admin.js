@@ -3,6 +3,7 @@ const ADMIN_PASSWORD_KEY = "suyo.minigame.admin.password.v3";
 const adminState = {
   password: localStorage.getItem(ADMIN_PASSWORD_KEY) || "",
   dashboard: null,
+  fullAudit: null,
   editingId: "",
   creators: [],
   voterQuery: ""
@@ -83,6 +84,7 @@ function formatDate(value) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false
   }).format(date);
 }
@@ -91,7 +93,7 @@ function toLocalInput(value) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
   const offset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  return new Date(date.getTime() - offset).toISOString().slice(0, 19);
 }
 
 function gameById(id) {
@@ -126,21 +128,30 @@ function renderGames() {
     return;
   }
   list.innerHTML = games.map((game) => `
-    <article class="admin-game-item ${game.published ? "" : "draft"}">
+    <article class="admin-game-item ${game.published ? "" : "draft"} ${game.lateSubmission ? "late" : ""}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
       <div>
-        <strong>${escapeHTML(game.title)}</strong>
+        <strong>${escapeHTML(game.title || "未命名草稿")}</strong>
         <span>${escapeHTML(game.team)}</span>
-        <small>${game.published ? "公开展示" : "草稿"}${game.featured ? " / 本期主推" : ""} / ${game.voteCount} 票</small>
+        <small>${gameStatusLabel(game)}${game.lateSubmission ? " / 补交" : ""}${game.featured ? " / 本期主推" : ""} / ${game.voteCount} 票</small>
+        <label class="owner-binding"><span>唯一负责人邮箱</span><input type="email" data-owner-email="${escapeHTML(game.id)}" value="${escapeHTML(game.ownerEmail || "")}" placeholder="name@example.com" /></label>
       </div>
       <div class="admin-row-actions">
         <button class="text-action" data-edit-game="${escapeHTML(game.id)}" type="button">编辑</button>
-        <button class="text-action danger-action" data-delete-game="${escapeHTML(game.id)}" type="button">删除</button>
+        <button class="text-action" data-bind-owner="${escapeHTML(game.id)}" type="button">绑定负责人</button>
+        ${game.lateSubmission ? `<button class="text-action danger-action" data-clear-late="${escapeHTML(game.id)}" type="button">复核补交标记</button>` : ""}
       </div>
     </article>
   `).join("");
   $$('[data-edit-game]', list).forEach((button) => button.addEventListener("click", () => editGame(button.dataset.editGame)));
-  $$('[data-delete-game]', list).forEach((button) => button.addEventListener("click", () => deleteGame(button.dataset.deleteGame)));
+  $$('[data-bind-owner]', list).forEach((button) => button.addEventListener("click", () => bindOwner(button.dataset.bindOwner)));
+  $$('[data-clear-late]', list).forEach((button) => button.addEventListener("click", () => clearLateMarker(button.dataset.clearLate)));
+}
+
+function gameStatusLabel(game) {
+  if (game.status === "withdrawn") return "已撤回";
+  if (game.status === "submitted" || game.published) return "公开展示";
+  return "草稿";
 }
 
 function renderBallots() {
@@ -187,6 +198,7 @@ function fillSettings() {
   form.elements.eventTitle.value = settings.eventTitle || "";
   form.elements.theme.value = settings.theme || "";
   form.elements.slogan.value = settings.slogan || "";
+  form.elements.submissionEndAt.value = toLocalInput(settings.submissionEndAt);
   form.elements.startAt.value = toLocalInput(settings.startAt);
   form.elements.endAt.value = toLocalInput(settings.endAt);
   form.elements.eventSeed.value = settings.eventSeed || "";
@@ -206,8 +218,6 @@ function renderResultControl() {
   if (published) {
     controls = `<div class="ignition-state published"><strong>宇宙已点亮</strong><span>${formatDate(settings.publishedAt)} 发布。结果会在用户下次刷新或重新打开时出现。</span></div>
       <div class="withdraw-results"><p>只有在确认结果需要更正时才能撤回。撤回会恢复锁票复核状态，清除旧裁定，并写入审计记录。</p><button class="text-action danger-action" id="withdrawResults" type="button">进入结果撤回流程</button></div>`;
-  } else if (status !== "locked") {
-    controls = `<div class="ignition-state"><strong>当前不可点亮</strong><span>投票截止后，完成复核与必要的同票裁定，发布按钮才会启用。</span></div>`;
   } else if (preview.positiveCount < 2) {
     controls = `<div class="ignition-state"><strong>有效作品不足</strong><span>至少需要两款作品获得有效票才能发布玩家之声。</span></div>`;
   } else if (preview.unresolved) {
@@ -223,7 +233,7 @@ function renderResultControl() {
       </form>`;
   } else {
     controls = `
-      <div class="ignition-state ready"><strong>点亮条件已满足</strong><span>两项玩家之声与最终星座已经锁定。发布后不能在后台直接删除选票。</span></div>
+      <div class="ignition-state ready"><strong>点亮条件已满足</strong><span>两项玩家之声与最终星座已经锁定。手动点亮后会立即停止投票，且不能直接删除选票。</span></div>
       <button class="button button-solid ignition-button" id="publishResults" type="button">确认并点亮全站宇宙</button>`;
   }
 
@@ -248,7 +258,7 @@ function renderResultControl() {
 
 function renderAudit() {
   const list = $("#auditList");
-  const audit = adminState.dashboard.recentAudit || [];
+  const audit = adminState.fullAudit || adminState.dashboard.recentAudit || [];
   if (!audit.length) {
     list.innerHTML = `<div class="admin-empty">暂无审计记录</div>`;
     return;
@@ -260,13 +270,25 @@ function renderAudit() {
     results_adjudicated: "管理员完成同票裁定",
     results_published: "管理员点亮宇宙",
     results_withdrawn: "管理员撤回公开结果",
-    planet_regenerated: "管理员重新生成天体"
+    planet_regenerated: "管理员重新生成天体",
+    game_created: "创建作品",
+    game_updated: "修改作品",
+    game_submitted: "提交参展",
+    game_withdrawn: "撤回作品",
+    game_owner_bound: "绑定负责人",
+    game_member_added: "添加队友",
+    game_member_removed: "移除队友",
+    creator_profile_updated: "修改成员资料",
+    game_late_marker_cleared: "撤销补交标记",
+    game_marked_late: "自动标记补交",
+    settings_updated: "修改赛事设置"
   };
   list.innerHTML = audit.map((item) => `
     <article class="audit-row">
       <time>${formatDate(item.createdAt)}</time>
       <strong>${escapeHTML(labels[item.action] || item.action)}</strong>
-      <span>${escapeHTML(item.reason || item.actorType || "system")}</span>
+      <span>${escapeHTML(item.actorEmail || item.reason || item.actorType || "system")}</span>
+      <details><summary>查看完整记录</summary><pre>${escapeHTML(JSON.stringify(item, null, 2))}</pre></details>
     </article>`).join("");
 }
 
@@ -285,10 +307,16 @@ function renderDashboard() {
   renderResultControl();
   renderAudit();
   fillSettings();
+  $("#auditGameFilter").innerHTML = `<option value="">全部作品</option>${dashboard.games.map((game) => `<option value="${escapeHTML(game.id)}">${escapeHTML(game.title || "未命名草稿")}</option>`).join("")}`;
 }
 
 async function loadDashboard() {
-  adminState.dashboard = await adminFetch("/api/admin/dashboard");
+  const [dashboard, auditResult] = await Promise.all([
+    adminFetch("/api/admin/dashboard"),
+    adminFetch("/api/admin/audit?limit=500")
+  ]);
+  adminState.dashboard = dashboard;
+  adminState.fullAudit = auditResult.audit;
   renderDashboard();
 }
 
@@ -388,11 +416,11 @@ function editGame(id) {
   form.elements.order.value = game.order ?? 100;
   form.elements.downloadUrl.value = game.downloadUrl || "";
   form.elements.coverUrl.value = /^https?:/.test(game.coverUrl || "") ? game.coverUrl : "";
-  form.elements.videoUrl.value = /^https?:/.test(game.videoUrl || "") ? game.videoUrl : "";
+  form.elements.videoExternalUrl.value = game.videoExternalUrl || "";
   form.elements.published.checked = Boolean(game.published);
   form.elements.featured.checked = Boolean(game.featured);
   $("#editorTitle").textContent = `编辑：${game.title}`;
-  $("#editorHint").textContent = "未重新上传的素材保持不变；制作人员姓名会影响自投复核";
+  $("#editorHint").textContent = "未重新上传的素材保持不变；参赛权限与自投限制以邮箱为准";
   $("#saveGame").textContent = "更新作品";
   $("#cancelEdit").hidden = false;
   $("#planetCoordinate").textContent = game.coordinate ? `X ${Number(game.coordinate.x).toFixed(5)} / Y ${Number(game.coordinate.y).toFixed(5)} / Z ${Number(game.coordinate.z ?? (Number(game.coordinate.depth ?? 0.5) * 2 - 1)).toFixed(5)}` : "尚未生成";
@@ -408,11 +436,6 @@ async function saveGame(event) {
   const button = $("#saveGame");
   const id = adminState.editingId;
   syncCreatorInputs();
-  if (id) {
-    const previousNames = (gameById(id)?.creators || []).map((creator) => normalizedName(creator.name)).sort().join("|");
-    const nextNames = adminState.creators.map((creator) => normalizedName(creator.name)).filter(Boolean).sort().join("|");
-    if (previousNames !== nextNames && !window.confirm("制作人员姓名发生变化，这会影响自投匹配与已有选票复核。确认继续保存吗？")) return;
-  }
   $("#creatorsJson").value = JSON.stringify(adminState.creators.map(({ id, name, role, avatarUrl }) => ({ id, name, role, avatarUrl })));
   const data = new FormData(form);
   button.disabled = true;
@@ -434,12 +457,36 @@ async function saveGame(event) {
   }
 }
 
-async function deleteGame(id) {
+async function bindOwner(id) {
   const game = gameById(id);
-  if (!game || !window.confirm(`确定删除《${game.title}》吗？相关票数会从统计中移除。`)) return;
+  const input = $(`[data-owner-email="${CSS.escape(id)}"]`);
+  const email = input?.value.trim();
+  if (!game || !email) return showToast("请填写负责人邮箱。");
+  if (!window.confirm(`将 ${email} 绑定为《${game.title || "未命名草稿"}》的唯一负责人？原负责人会立即失去权限。`)) return;
   try {
-    const result = await adminFetch(`/api/admin/games/${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (adminState.editingId === id) resetGameForm();
+    const result = await adminFetch(`/api/admin/games/${encodeURIComponent(id)}/owner`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    showToast(result.message);
+    await loadDashboard();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function clearLateMarker(id) {
+  const game = gameById(id);
+  if (!game) return;
+  const reason = window.prompt(`复核《${game.title}》的补交审计后，填写撤销标记的原因：`);
+  if (!reason?.trim()) return;
+  try {
+    const result = await adminFetch(`/api/admin/games/${encodeURIComponent(id)}/late`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() })
+    });
     showToast(result.message);
     await loadDashboard();
   } catch (error) {
@@ -497,7 +544,12 @@ async function saveSettings(event) {
     const result = await adminFetch("/api/admin/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...data, startAt: new Date(data.startAt).toISOString(), endAt: new Date(data.endAt).toISOString() })
+      body: JSON.stringify({
+        ...data,
+        submissionEndAt: new Date(data.submissionEndAt).toISOString(),
+        startAt: new Date(data.startAt).toISOString(),
+        endAt: new Date(data.endAt).toISOString()
+      })
     });
     message($("#settingsMessage"), result.message);
     await loadDashboard();
@@ -595,6 +647,23 @@ function exportAudit() {
   return exportCsv({ button: $("#exportAudit"), endpoint: "/api/admin/export/audit.csv", filename: "suyo-minigame-audit.csv", idleLabel: "导出审计" });
 }
 
+async function filterAudit(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const query = new URLSearchParams({ limit: "500" });
+  for (const name of ["gameId", "email"]) {
+    const value = String(data.get(name) || "").trim();
+    if (value) query.set(name, value);
+  }
+  try {
+    const result = await adminFetch(`/api/admin/audit?${query}`);
+    adminState.fullAudit = result.audit;
+    renderAudit();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 function init() {
   $("#adminLoginForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -622,6 +691,7 @@ function init() {
     renderCreatorRows();
   });
   $("#settingsForm").addEventListener("submit", saveSettings);
+  $("#auditFilterForm").addEventListener("submit", filterAudit);
   $("#exportVotes").addEventListener("click", exportVotes);
   $("#exportAudit").addEventListener("click", exportAudit);
   $("#voterSearch").addEventListener("input", (event) => {

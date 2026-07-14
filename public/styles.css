@@ -1499,6 +1499,11 @@ select:focus {
   opacity: 0.62;
 }
 
+.admin-game-item.late {
+  border-left: 3px solid var(--danger);
+  padding-left: 14px;
+}
+
 .admin-game-item img {
   width: 112px;
   aspect-ratio: 16 / 10;
@@ -1527,7 +1532,28 @@ select:focus {
 
 .admin-row-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 16px;
+}
+
+.owner-binding {
+  display: grid;
+  grid-template-columns: max-content minmax(150px, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.owner-binding input,
+.admin-search select {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
 }
 
 .danger-action {
@@ -2059,6 +2085,11 @@ select:focus {
 
   .admin-row-actions {
     grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .owner-binding {
+    grid-template-columns: 1fr;
   }
 
   .settings-form {
@@ -2448,6 +2479,29 @@ select:focus {
 .audit-row time,
 .audit-row span {
   color: var(--muted);
+}
+
+.audit-row details {
+  grid-column: 1 / -1;
+}
+
+.audit-row summary {
+  width: max-content;
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.audit-row pre {
+  max-height: 340px;
+  overflow: auto;
+  margin: 12px 0 0;
+  border-left: 2px solid var(--accent);
+  padding: 12px;
+  color: var(--ink);
+  background: var(--surface-strong);
+  font-size: 0.68rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1120px) {

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111310" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#d7d9d4" media="(prefers-color-scheme: light)" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>参赛作品工作台 | 溯造 MiniGame</title>
+    <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
+    <link rel="stylesheet" href="/submit.css?v=20260714s" />
+  </head>
+  <body>
+    <div class="submission-sky" aria-hidden="true"><i></i><i></i><i></i></div>
+    <header class="submission-topbar">
+      <a class="submission-brand" href="/" aria-label="返回公开星图"><img src="/assets/suyo-studio.png" alt="SuYo Studio 溯游工作室" /></a>
+      <div class="submission-event"><strong>溯造 MiniGame 游戏开发大赛</strong><span>参赛作品观测档案</span></div>
+      <div class="submission-account"><span id="accountLabel">尚未登录</span><a href="/">返回星图</a><button id="logoutButton" type="button" hidden>退出</button></div>
+    </header>
+
+    <main class="submission-shell">
+      <section class="submission-auth" id="authPanel">
+        <div class="auth-observatory" aria-hidden="true"><div class="auth-orbit one"></div><div class="auth-orbit two"></div><div class="auth-body"></div></div>
+        <div class="auth-copy"><p>参赛者身份验证</p><h1>建立你的作品坐标</h1><span>使用邮箱验证码登录。浏览、投票和作品管理共用同一身份。</span></div>
+        <form id="authForm" novalidate>
+          <label><span>姓名</span><input name="name" maxlength="30" autocomplete="name" required /></label>
+          <label><span>队伍</span><input name="team" maxlength="50" autocomplete="organization" required /></label>
+          <label class="wide"><span>邮箱</span><input name="email" type="email" maxlength="180" autocomplete="email" required /></label>
+          <label><span>6 位验证码</span><input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" /></label>
+          <button class="signal-button secondary" id="sendCode" type="button">发送验证码</button>
+          <button class="signal-button primary wide" id="verifyLogin" type="submit">验证并进入工作台</button>
+          <p class="form-message wide" id="authMessage" role="status"></p>
+        </form>
+      </section>
+
+      <section class="submission-loading" id="workspaceLoading" hidden aria-live="polite"><span></span><strong>正在读取作品轨道</strong></section>
+
+      <section class="draft-origin" id="draftOrigin" hidden>
+        <div><p>尚未建立作品</p><h1>为一个新世界命名</h1><span>草稿阶段只需要暂定名称。其他资料可以随时补充。</span></div>
+        <form id="createDraftForm"><label><span>作品暂定名</span><input name="title" maxlength="60" required /></label><button class="signal-button primary" type="submit">建立作品草稿</button><p class="form-message" id="createMessage" role="status"></p></form>
+      </section>
+
+      <section class="participant-workspace" id="participantWorkspace" hidden>
+        <header class="workspace-heading">
+          <div><p id="workspaceEyebrow">作品档案</p><h1 id="workspaceTitle">未命名作品</h1><span id="workspaceTeam"></span></div>
+          <div class="workspace-state"><strong id="statusLabel">草稿</strong><span id="deadlineLabel"></span><span id="roleLabel"></span></div>
+        </header>
+
+        <nav class="workspace-nav" aria-label="作品编辑导航">
+          <a href="#contentSection">作品内容</a><a href="#mediaSection">媒体信号</a><a href="#teamSection">制作人员</a><a href="#submissionSection">提交状态</a>
+        </nav>
+
+        <form class="work-form" id="gameForm">
+          <input name="revision" id="gameRevision" type="hidden" />
+          <section class="work-section" id="contentSection">
+            <header><div><span>作品内容</span><h2>游戏档案</h2></div><p>已提交作品的文字与画面可以继续修改，不会改变原提交时间。</p></header>
+            <div class="field-grid">
+              <label><span>游戏名称</span><input name="title" maxlength="60" required /></label>
+              <label><span>队伍名称</span><input name="team" maxlength="60" /></label>
+              <label class="wide"><span>一句话介绍</span><input name="shortDescription" maxlength="120" /></label>
+              <label class="wide"><span>游戏简介</span><textarea name="description" rows="7" maxlength="1200"></textarea></label>
+              <label class="wide"><span>创作手记</span><textarea name="creationNote" rows="6" maxlength="600"></textarea><small>选填。可以记录灵感、取舍和 Game Jam 过程。</small></label>
+              <label class="wide"><span>标签</span><input name="tags" maxlength="120" placeholder="解谜，叙事，动作" /></label>
+            </div>
+          </section>
+
+          <section class="work-section" id="mediaSection">
+            <header><div><span>媒体信号</span><h2>封面与演示</h2></div><p>上传视频优先播放，公开视频链接会作为备用信号保留。</p></header>
+            <div class="field-grid">
+              <label><span>游戏封面</span><input name="cover" type="file" accept="image/*" /><small id="coverCurrent">尚未上传</small></label>
+              <label><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
+              <label><span>上传演示视频</span><input name="video" type="file" accept="video/mp4,video/webm,video/quicktime" /><small id="videoCurrent">单个文件不超过 200MB</small></label>
+              <label><span>公开视频链接</span><input name="videoExternalUrl" type="url" placeholder="哔哩哔哩、腾讯视频、YouTube 或视频直链" /></label>
+              <label class="wide critical-field"><span>游戏下载地址</span><input name="downloadUrl" type="url" placeholder="https://" /><small id="downloadNotice">截止后修改此字段会永久产生补交标记。</small></label>
+            </div>
+          </section>
+
+          <div class="save-dock"><div><strong id="saveState">尚无未保存修改</strong><span id="updatedAtLabel"></span></div><button class="signal-button primary" id="saveGame" type="submit">保存作品详情</button><p class="form-message" id="gameMessage" role="status"></p></div>
+        </form>
+
+        <section class="work-section" id="teamSection">
+          <header><div><span>制作人员</span><h2>轨道成员</h2></div><p>成员邮箱决定编辑权限与自投限制，历史成员永久保留自投限制。</p></header>
+          <div class="team-roster" id="teamRoster"></div>
+          <form class="member-invite" id="memberInviteForm">
+            <label><span>队友姓名</span><input name="name" maxlength="40" required /></label>
+            <label><span>队友邮箱</span><input name="email" type="email" maxlength="180" required /></label>
+            <label><span>职能</span><input name="role" maxlength="40" placeholder="程序、美术、策划" /></label>
+            <button class="signal-button secondary" type="submit">添加并授权</button>
+            <p class="form-message" id="memberMessage" role="status"></p>
+          </form>
+        </section>
+
+        <section class="work-section submission-control" id="submissionSection">
+          <header><div><span>提交状态</span><h2>进入共享宇宙</h2></div><p id="submissionDescription"></p></header>
+          <div class="submission-checks" id="submissionChecks"></div>
+          <div class="submission-actions"><button class="signal-button primary" id="submitGame" type="button">提交参展</button><button class="signal-button danger" id="withdrawGame" type="button">撤回作品</button></div>
+          <p class="form-message" id="submissionMessage" role="status"></p>
+        </section>
+      </section>
+    </main>
+
+    <dialog class="submission-dialog" id="profileDialog">
+      <form id="profileForm" method="dialog">
+        <header><div><span>成员资料</span><h2 id="profileDialogTitle">修改制作人员资料</h2></div><button type="button" data-close-dialog="profileDialog">关闭</button></header>
+        <input name="memberId" type="hidden" />
+        <label><span>姓名</span><input name="name" maxlength="40" required /></label>
+        <label><span>职能</span><input name="role" maxlength="40" /></label>
+        <label><span>头像</span><input name="profileAvatar" type="file" accept="image/*" /></label>
+        <button class="signal-button primary" type="submit">保存成员资料</button><p class="form-message" id="profileMessage" role="status"></p>
+      </form>
+    </dialog>
+
+    <dialog class="submission-dialog confirm-dialog" id="confirmDialog">
+      <div><span id="confirmEyebrow">操作确认</span><h2 id="confirmTitle"></h2><p id="confirmDescription"></p><div class="confirm-actions"><button class="signal-button secondary" id="cancelConfirm" type="button">取消</button><button class="signal-button danger" id="acceptConfirm" type="button">确认</button></div></div>
+    </dialog>
+
+    <div class="submission-toast" id="toast" hidden role="status"></div>
+    <script src="/submit.js?v=20260714s" defer></script>
+  </body>
+</html>
