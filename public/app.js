@@ -1714,12 +1714,14 @@ function updateDetailScrollCue() {
   if (!cue) return;
 
   const scroller = detailScrollRoot();
-  const remaining = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-  const hasHiddenContent = scroller.scrollHeight - scroller.clientHeight > 36;
+  const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  const bottomThreshold = Math.min(72, Math.max(32, scroller.clientHeight * 0.04));
+  const hasHiddenContent = maxScroll > 36;
+  const atBottom = scroller.scrollTop >= maxScroll - bottomThreshold;
   const visible = !detail.hidden
     && detail.classList.contains("visible")
     && hasHiddenContent
-    && remaining > 28;
+    && !atBottom;
 
   cue.classList.toggle("visible", visible);
   cue.disabled = !visible;
@@ -1837,8 +1839,10 @@ function installDetailScrollCue() {
       behavior: state.reducedMotion ? "auto" : "smooth"
     });
   });
-  detail.addEventListener("scroll", queueDetailScrollCueUpdate, { passive: true });
-  content.addEventListener("scroll", queueDetailScrollCueUpdate, { passive: true });
+  detail.addEventListener("scroll", updateDetailScrollCue, { passive: true });
+  content.addEventListener("scroll", updateDetailScrollCue, { passive: true });
+  detail.addEventListener("scrollend", updateDetailScrollCue, { passive: true });
+  content.addEventListener("scrollend", updateDetailScrollCue, { passive: true });
   window.visualViewport?.addEventListener("resize", queueDetailScrollCueUpdate, { passive: true });
   window.addEventListener("orientationchange", queueDetailScrollCueUpdate, { passive: true });
   if ("ResizeObserver" in window) {
