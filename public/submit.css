@@ -90,8 +90,25 @@ button { cursor: pointer; }
   backdrop-filter: blur(18px);
 }
 
-.submission-brand { display: block; width: 116px; }
-.submission-brand img { display: block; width: 100%; filter: invert(1); }
+.submission-brand {
+  position: relative;
+  display: block;
+  width: 116px;
+  /* Visible alpha bounds in the 881 x 299 source: x 104..796, y 48..223. */
+  aspect-ratio: 692 / 175;
+  overflow: hidden;
+}
+.submission-brand img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 127.312138%;
+  max-width: none;
+  height: auto;
+  filter: invert(1);
+  transform: translate(-11.804767%, -16.053512%);
+}
 @media (prefers-color-scheme: light) { .submission-brand img { filter: none; } }
 .submission-event { display: grid; gap: 1px; border-left: 1px solid var(--line); margin-left: 24px; padding-left: 24px; }
 .submission-event strong { font-size: .78rem; letter-spacing: .02em; }
