@@ -65,81 +65,6 @@ function isoAfter(days) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function seedGames() {
-  const createdAt = new Date().toISOString();
-  return [
-    {
-      id: "gravity-seed",
-      title: "引力种子",
-      team: "远日点小组",
-      shortDescription: "在坍缩之前，为一颗荒芜星球种下最后的生态。",
-      description: "一款关于重力、生态与选择的微型建造游戏。每一次播种都会改变星体质量，也改变你下一次落脚的方向。",
-      creationNote: "我们想验证，生态建造是否能直接改变玩家的移动方式，而不是只改变资源数字。",
-      creators: [
-        { id: "gravity-linye", name: "林野", role: "策划", avatarUrl: "", order: 0 },
-        { id: "gravity-zhouyuan", name: "周原", role: "程序", avatarUrl: "", order: 1 },
-        { id: "gravity-lizi", name: "栗子", role: "美术", avatarUrl: "", order: 2 }
-      ],
-      coverUrl: "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=1600&q=88",
-      videoUrl: "",
-      downloadUrl: "",
-      tags: ["建造", "物理解谜"],
-      featured: true,
-      published: true,
-      order: 10,
-      isDemo: true,
-      createdAt,
-      updatedAt: createdAt
-    },
-    {
-      id: "echo-orbit",
-      title: "回声轨道",
-      team: "无界电台",
-      shortDescription: "驾驶一段无线电回声，穿过正在失联的星系。",
-      description: "你无法控制飞船，只能改变广播的频率。让声音借行星引力转弯，找到仍在回应你的文明。",
-      creationNote: "我们想知道，当玩家只能改变频率而不能控制方向时，声音能不能成为真正的导航方式。",
-      creators: [
-        { id: "echo-songke", name: "宋可", role: "主创", avatarUrl: "", order: 0 },
-        { id: "echo-aluo", name: "阿落", role: "程序", avatarUrl: "", order: 1 },
-        { id: "echo-sanyi", name: "叁一", role: "声音", avatarUrl: "", order: 2 }
-      ],
-      coverUrl: "https://images.unsplash.com/photo-1444703686981-a3abbc4d4fe3?auto=format&fit=crop&w=1600&q=88",
-      videoUrl: "",
-      downloadUrl: "",
-      tags: ["声音", "叙事"],
-      featured: false,
-      published: true,
-      order: 20,
-      isDemo: true,
-      createdAt,
-      updatedAt: createdAt
-    },
-    {
-      id: "moon-shift",
-      title: "月面夜班",
-      team: "低温办公室",
-      shortDescription: "维护月球背面的自动售货机，直到地球再次升起。",
-      description: "一场发生在月背的短篇工作模拟。补货、修理、倾听路过宇航员留下的语音便签。",
-      creationNote: "我们想把一份普通夜班工作做成短暂而安静的相遇，让重复操作也能留下情绪。",
-      creators: [
-        { id: "moon-moyi", name: "莫一", role: "制作", avatarUrl: "", order: 0 },
-        { id: "moon-jiaotang", name: "焦糖", role: "美术", avatarUrl: "", order: 1 },
-        { id: "moon-rin", name: "Rin", role: "音乐", avatarUrl: "", order: 2 }
-      ],
-      coverUrl: "https://images.unsplash.com/photo-1614728263952-84ea256f9679?auto=format&fit=crop&w=1600&q=88",
-      videoUrl: "",
-      downloadUrl: "",
-      tags: ["模拟", "短篇"],
-      featured: false,
-      published: true,
-      order: 30,
-      isDemo: true,
-      createdAt,
-      updatedAt: createdAt
-    }
-  ];
-}
-
 function creatorId(name, role, index) {
   return crypto.createHash("sha1").update(`${name}:${role}:${index}`).digest("hex").slice(0, 16);
 }
@@ -352,7 +277,7 @@ function createEmptyStore() {
   return {
     version: 7,
     createdAt: new Date().toISOString(),
-    games: seedGames(),
+    games: [],
     ballots: [],
     ballotOperations: {},
     verificationCodes: {},
