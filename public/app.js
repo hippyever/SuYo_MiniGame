@@ -1758,17 +1758,17 @@ function detailScrollRoot() {
 function updateDetailScrollCue() {
   const detail = $("#planetDetail");
   const cue = $("#detailScrollCue");
-  if (!cue) return;
+  const endMarker = $("#detailScrollEnd");
+  if (!cue || !endMarker) return;
 
-  const scroller = detailScrollRoot();
-  const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-  const bottomThreshold = Math.min(72, Math.max(32, scroller.clientHeight * 0.04));
-  const hasHiddenContent = maxScroll > 36;
-  const atBottom = scroller.scrollTop >= maxScroll - bottomThreshold;
+  const visualViewportBottom = window.visualViewport
+    ? window.visualViewport.offsetTop + window.visualViewport.height
+    : window.innerHeight;
+  const detailBottom = Math.min(detail.getBoundingClientRect().bottom, visualViewportBottom);
+  const endReached = endMarker.getBoundingClientRect().top <= detailBottom - 1;
   const visible = !detail.hidden
     && detail.classList.contains("visible")
-    && hasHiddenContent
-    && !atBottom;
+    && !endReached;
 
   cue.classList.toggle("visible", visible);
   cue.disabled = !visible;
@@ -1783,6 +1783,12 @@ function queueDetailScrollCueUpdate() {
 function installDetailScrollCue() {
   const detail = $("#planetDetail");
   const content = $(".detail-content", detail);
+  const endMarker = document.createElement("span");
+  endMarker.id = "detailScrollEnd";
+  endMarker.className = "detail-scroll-end";
+  endMarker.setAttribute("aria-hidden", "true");
+  content.append(endMarker);
+
   const cue = document.createElement("button");
   cue.id = "detailScrollCue";
   cue.className = "detail-scroll-cue";
@@ -1796,6 +1802,13 @@ function installDetailScrollCue() {
   const style = document.createElement("style");
   style.id = "detail-scroll-cue-style";
   style.textContent = `
+    .detail-scroll-end {
+      display: block;
+      width: 100%;
+      height: 1px;
+      pointer-events: none;
+    }
+
     .detail-scroll-cue {
       position: fixed;
       right: clamp(26px, 4vw, 62px);
@@ -1896,6 +1909,9 @@ function installDetailScrollCue() {
     const observer = new ResizeObserver(queueDetailScrollCueUpdate);
     observer.observe(detail);
     observer.observe(content);
+  }
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(queueDetailScrollCueUpdate, { threshold: [0, 1] }).observe(endMarker);
   }
 }
 
