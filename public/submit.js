@@ -92,7 +92,7 @@ function renderHeader() {
 }
 
 function memberStatus(member) {
-  return member.firstLoginAt ? `已登录验证：${formatDate(member.firstLoginAt)}` : "待首次登录";
+  return member.firstLoginAt ? `已于 ${formatDate(member.firstLoginAt)} 验证登录` : "待首次邮箱验证";
 }
 
 function avatarMarkup(creator) {

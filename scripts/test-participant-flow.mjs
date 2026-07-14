@@ -51,6 +51,8 @@ function workForm(game, overrides = {}) {
 const ownerEmail = "owner-flow@example.com";
 const teammateEmail = "member-flow@example.com";
 const voterEmail = "voter-flow@example.com";
+const preverifiedEmail = "preverified-member@example.com";
+const preverifiedCookie = await login("Preverified member", "Orbit team", preverifiedEmail);
 const ownerCookie = await login("远夏", "远日点小组", ownerEmail);
 
 let result = await request("/api/participant/games", {
@@ -83,6 +85,19 @@ assert.equal(result.response.status, 201);
 game = result.body.game;
 const member = game.teamMembers.find((item) => item.email === teammateEmail && item.active);
 assert.ok(member);
+
+result = await request(`/api/participant/games/${game.id}/members`, {
+  cookie: ownerCookie,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "Preverified member", email: preverifiedEmail, role: "Audio" })
+});
+assert.equal(result.response.status, 201);
+game = result.body.game;
+const preverifiedMember = game.teamMembers.find((item) => item.email === preverifiedEmail && item.active);
+assert.match(preverifiedMember.firstLoginAt, /^\d{4}-\d{2}-\d{2}T/);
+result = await request("/api/participant/workspace", { cookie: preverifiedCookie });
+assert.equal(result.body.game.role, "member");
 
 result = await request(`/api/participant/games/${game.id}/submit`, { cookie: ownerCookie, method: "POST" });
 assert.equal(result.response.status, 200);

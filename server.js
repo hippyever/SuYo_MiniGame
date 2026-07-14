@@ -179,6 +179,52 @@ function normalizeTeamMembers(value) {
   })).filter((member) => isValidEmail(member.email));
 }
 
+function normalizeEmailVerification(value) {
+  if (!value || typeof value !== "object") return null;
+  const firstVerifiedAt = cleanText(value.firstVerifiedAt, 60);
+  const lastVerifiedAt = cleanText(value.lastVerifiedAt, 60) || firstVerifiedAt;
+  if (!firstVerifiedAt) return null;
+  return { firstVerifiedAt, lastVerifiedAt };
+}
+
+function recordEmailVerification(store, email, verifiedAt) {
+  const normalized = normalizeEmail(email);
+  const timestamp = cleanText(verifiedAt, 60);
+  if (!normalized || !timestamp) return null;
+  store.emailVerifications ||= {};
+  const current = normalizeEmailVerification(store.emailVerifications[normalized]);
+  const times = [current?.firstVerifiedAt, current?.lastVerifiedAt, timestamp]
+    .filter(Boolean)
+    .sort((left, right) => Date.parse(left) - Date.parse(right));
+  const record = { firstVerifiedAt: times[0], lastVerifiedAt: times.at(-1) };
+  store.emailVerifications[normalized] = record;
+  return record;
+}
+
+function firstEmailVerificationAt(store, email) {
+  return normalizeEmailVerification(store.emailVerifications?.[normalizeEmail(email)])?.firstVerifiedAt || "";
+}
+
+function backfillEmailVerifications(store) {
+  store.emailVerifications = store.emailVerifications && typeof store.emailVerifications === "object" && !Array.isArray(store.emailVerifications)
+    ? Object.fromEntries(Object.entries(store.emailVerifications)
+      .map(([email, value]) => [normalizeEmail(email), normalizeEmailVerification(value)])
+      .filter(([email, value]) => isValidEmail(email) && value))
+    : {};
+  for (const event of store.audit) {
+    if (event?.action !== "session_verified") continue;
+    recordEmailVerification(store, event.voterEmail || event.actorEmail, event.createdAt);
+  }
+  for (const session of Object.values(store.sessions)) {
+    recordEmailVerification(store, session?.email, session?.createdAt);
+  }
+  for (const game of store.games) {
+    for (const member of game.teamMembers) {
+      member.firstLoginAt ||= firstEmailVerificationAt(store, member.email);
+    }
+  }
+}
+
 function normalizeAssetMeta(value) {
   if (!value || typeof value !== "object") return null;
   return {
@@ -303,13 +349,14 @@ function ensureGameCoordinates(store) {
 
 function createEmptyStore() {
   return {
-    version: 5,
+    version: 6,
     createdAt: new Date().toISOString(),
     games: seedGames(),
     ballots: [],
     ballotOperations: {},
     verificationCodes: {},
     sessions: {},
+    emailVerifications: {},
     audit: [],
     retiredAssets: [],
     settings: {
@@ -332,7 +379,7 @@ function createEmptyStore() {
 function migrateStore(store) {
   const empty = createEmptyStore();
   const defaultDemoById = new Map(empty.games.map((game) => [game.id, game]));
-  store.version = 5;
+  store.version = 6;
   store.games = (Array.isArray(store.games) ? store.games : empty.games).map((game) => {
     const status = gameStatus(game);
     const legacyVideo = cleanAssetUrl(game.videoUrl);
@@ -382,6 +429,7 @@ function migrateStore(store) {
   store.verificationCodes = store.verificationCodes && typeof store.verificationCodes === "object" ? store.verificationCodes : {};
   store.sessions = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
   store.audit = Array.isArray(store.audit) ? store.audit : [];
+  backfillEmailVerifications(store);
   store.retiredAssets = (Array.isArray(store.retiredAssets) ? store.retiredAssets : []).map(normalizeAssetMeta).filter((asset) => asset?.url);
   const previousSettings = store.settings && typeof store.settings === "object" ? store.settings : {};
   store.settings = { ...empty.settings, ...previousSettings };
@@ -898,11 +946,12 @@ async function handleAuthVerify(req, res) {
       userAgent: cleanText(req.headers["user-agent"], 300)
     };
     store.sessions[sessionHash(token)] = session;
+    const emailVerification = recordEmailVerification(store, email, session.createdAt);
     for (const game of store.games) {
       const member = normalizeTeamMembers(game.teamMembers).find((item) => item.active && item.email === email);
       if (!member || member.firstLoginAt) continue;
       const storedMember = game.teamMembers.find((item) => item.id === member.id);
-      if (storedMember) storedMember.firstLoginAt = session.createdAt;
+      if (storedMember) storedMember.firstLoginAt = emailVerification.firstVerifiedAt;
       addAudit(store, {
         action: "team_member_first_login",
         actorType: "participant",
@@ -1858,12 +1907,13 @@ async function handleParticipantAddMember(req, res, id) {
       throw error;
     }
     const creator = { id: existingMember?.creatorId || randomId(), name, role, avatarUrl: "", order: normalizeCreators(game.creators).length };
+    const firstLoginAt = firstEmailVerificationAt(store, email);
     game.creators = [...normalizeCreators(game.creators).filter((item) => item.id !== creator.id), creator];
     if (existingMember) {
       const stored = game.teamMembers.find((member) => member.id === existingMember.id);
-      Object.assign(stored, { active: true, removedAt: "", creatorId: creator.id, addedAt: new Date().toISOString() });
+      Object.assign(stored, { active: true, removedAt: "", creatorId: creator.id, addedAt: new Date().toISOString(), firstLoginAt: stored.firstLoginAt || firstLoginAt });
     } else {
-      game.teamMembers.push({ id: randomId(), email, creatorId: creator.id, active: true, addedAt: new Date().toISOString(), removedAt: "", firstLoginAt: "" });
+      game.teamMembers.push({ id: randomId(), email, creatorId: creator.id, active: true, addedAt: new Date().toISOString(), removedAt: "", firstLoginAt });
     }
     game.historicalTeamEmails = [...new Set([...(game.historicalTeamEmails || []), email])];
     game.updatedAt = new Date().toISOString();
