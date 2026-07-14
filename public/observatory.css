@@ -2135,6 +2135,7 @@ canvas:focus-visible {
 }
 
 .floating-core {
+  position: absolute;
   top: 72%;
   left: 13%;
   z-index: 5;
