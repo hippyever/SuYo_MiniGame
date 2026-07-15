@@ -54,6 +54,8 @@ const state = {
   landing: false,
   landingTimer: null,
   navigationHintTimer: null,
+  navigationGuideStage: "orient",
+  navigationGuideActive: false,
   creatorOrbitFrame: null,
   creatorOrbitStartedAt: 0,
   pendingVoteId: "",
@@ -337,7 +339,8 @@ function applyPerformanceMode() {
   document.body.classList.toggle("standard-performance", state.performanceTier === "standard");
   $("#performanceButton").dataset.mode = state.performanceTier;
   $("#performanceButton").setAttribute("aria-label", `当前${performanceLabel(state.performanceTier)}，点击切换表现等级`);
-  $("#performanceButton").textContent = `画质：${performanceLabel(state.performanceTier)}`;
+  $(".desktop-label", $("#performanceButton")).textContent = `画质：${performanceLabel(state.performanceTier)}`;
+  $(".mobile-label", $("#performanceButton")).textContent = "画质";
   resizeCanvas();
 }
 
@@ -649,6 +652,7 @@ function dollyCamera(amount, { user = true, persist = true } = {}) {
   const next = addScaled(base, travelDirection, travel);
   state.cameraDestination = { ...base, ...next, mode: "free" };
   clampCamera();
+  if (amount > 0 && state.selectedTargetId && state.navigationGuideActive) showNavigationHint("approach");
   if (persist) writeLocalState();
 }
 
@@ -783,6 +787,7 @@ function bindCanvasControls() {
     pointer.y = event.clientY;
     pointer.time = performance.now();
     state.dragDistance += Math.hypot(pointer.x - oldX, pointer.y - oldY);
+    if (state.dragDistance > 18 && state.navigationGuideStage === "orient") showNavigationHint("select");
 
     if (state.pointers.size === 1) {
       const dx = pointer.x - oldX;
@@ -890,6 +895,7 @@ function selectTarget(id) {
   state.overviewIntent = 0;
   setTarget(id);
   aimCameraAtTarget(game);
+  showNavigationHint("approach");
   updateMapMode();
   writeLocalState();
 }
@@ -963,7 +969,7 @@ function updateTargetConsole(snapshot = state.targetProximity) {
     spectrum: { label: "光谱初判", signal: "类型已解析", hint: (game.tags || [])[0] || "作品色谱正在显现", action: "继续靠近" },
     media: { label: "玩法解析", signal: "媒体信号接入", hint: game.videoUrl ? "静音玩法片段正在显现" : "作品封面正在显现", action: "继续靠近" },
     identity: { label: "身份解析", signal: "作品名称已确认", hint: game.title, action: "进入观测壳层" },
-    source: { label: "来源解析", signal: "作品行星已确认", hint: `${game.team} / ${(game.creators || []).map((creator) => creator.name).slice(0, 2).join("、") || "作者待补充"}`, action: "查看游戏" }
+    source: { label: "作品内容已显现", signal: "作品行星已确认", hint: `${game.team} / ${(game.creators || []).map((creator) => creator.name).slice(0, 2).join("、") || "作者待补充"}`, action: "查看游戏" }
   };
   const copy = copies[level];
   consoleElement.hidden = false;
@@ -977,6 +983,7 @@ function updateTargetConsole(snapshot = state.targetProximity) {
   $("#signalScale").dataset.level = level;
   $("#signalScale").style.setProperty("--signal-strength", String(snapshot?.signal || 0));
   $("#openTarget").textContent = copy.action;
+  if (level === "source" && state.navigationGuideActive) showNavigationHint("open");
 }
 
 function approachOrOpenTarget() {
@@ -1761,11 +1768,13 @@ function updateDetailScrollCue() {
   const endMarker = $("#detailScrollEnd");
   if (!cue || !endMarker) return;
 
+  const scroller = detailScrollRoot();
+  const scrollEndReached = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 3;
   const visualViewportBottom = window.visualViewport
     ? window.visualViewport.offsetTop + window.visualViewport.height
     : window.innerHeight;
-  const detailBottom = Math.min(detail.getBoundingClientRect().bottom, visualViewportBottom);
-  const endReached = endMarker.getBoundingClientRect().top <= detailBottom - 1;
+  const markerReached = endMarker.getBoundingClientRect().top <= visualViewportBottom + 2;
+  const endReached = scrollEndReached || markerReached;
   const visible = !detail.hidden
     && detail.classList.contains("visible")
     && !endReached;
@@ -1840,6 +1849,12 @@ function installDetailScrollCue() {
       opacity: 1;
       transform: translate3d(0, 0, 0);
       pointer-events: auto;
+    }
+
+    .detail-scroll-cue[aria-hidden="true"] {
+      visibility: hidden;
+      opacity: 0;
+      transform: translate3d(0, 12px, 0);
     }
 
     .detail-scroll-cue:not(:disabled):hover,
@@ -1975,6 +1990,8 @@ function openDetail(id) {
   const game = state.gameById.get(id);
   if (!game || state.landing || state.detailId) return;
   state.detailId = id;
+  state.navigationGuideActive = false;
+  dismissNavigationHint(true);
   state.detailReturnCamera = { ...state.camera };
   state.detailOriginFocus = document.activeElement;
   state.landing = true;
@@ -2089,7 +2106,9 @@ function renderSearch(query = "") {
       <div><strong>${escapeHTML(game.title)}${game.lateSubmission ? ` <small class="late-badge">补交</small>` : ""}</strong><span>${escapeHTML(game.team)}</span></div>
       <code>${escapeHTML(coordinateLabel(game))}</code>
     </button>
-  `).join("") : `<p class="dialog-intro">没有找到匹配作品。</p>`;
+  `).join("") : state.games.length
+    ? `<p class="dialog-intro">没有找到匹配作品。可以尝试游戏名称、队伍或制作人员。</p>`
+    : `<div class="search-empty"><strong>尚无作品信号</strong><p>第一颗作品行星提交后，会在这里显示名称并可直接导航。</p><a href="/submit">提交首个作品</a></div>`;
   $$('[data-search-id]', $("#searchResults")).forEach((button) => button.addEventListener("click", () => {
     const id = button.dataset.searchId;
     closeDialog($("#searchDialog"));
@@ -2205,6 +2224,11 @@ function validateProfile() {
 
 function openAuth(pendingVoteId = "") {
   if (pendingVoteId) state.pendingVoteId = pendingVoteId;
+  const pendingGame = state.gameById.get(pendingVoteId);
+  $("#authTitle").textContent = pendingGame ? "验证后继续提取" : "登录投票身份";
+  $("#authIntro").textContent = pendingGame
+    ? `验证成功后将返回《${pendingGame.title}》的可能性核心提取仪式。`
+    : "浏览无需登录。验证一次后，即可在投票截止前随时修改选票。";
   const profile = readProfile();
   $("#authName").value ||= profile.name || "";
   $("#authTeam").value ||= profile.team || "";
@@ -2479,6 +2503,12 @@ function setRitualPhase(phase, { title, status, eyebrow } = {}) {
   state.ritualPhase = phase;
   const ceremony = $("#voteCeremony");
   ceremony.dataset.phase = phase;
+  const orbitStep = ["floating", "replacement", "submitting", "handoff", "orbiting", "success", "personal"].includes(phase);
+  $$('[data-ritual-step]', $("#ceremonySteps")).forEach((step) => {
+    const current = step.dataset.ritualStep === (orbitStep ? "orbit" : "extract");
+    if (current) step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
   if (title || status || eyebrow) setCeremonyStatus(title || $("#ceremonyTitle").textContent, status || $("#ceremonyStatus").textContent, eyebrow || $("#ceremonyEyebrow").textContent);
   $("#ceremonyHint").hidden = true;
   scheduleCeremonyHint();
@@ -3242,8 +3272,12 @@ function closeBallotDialog() {
 
 function updateAccountUI() {
   const authenticated = state.session.authenticated;
-  $("#loginButton").textContent = authenticated ? state.session.identity.name : "登录";
+  const loginButton = $("#loginButton");
+  loginButton.textContent = authenticated ? "我的星系" : "登录";
+  loginButton.title = authenticated ? `${state.session.identity.name} / ${state.session.identity.team}` : "登录投票身份";
+  loginButton.setAttribute("aria-label", loginButton.title);
   $("#ballotCount").textContent = `${state.ballot.gameIds.length}/3`;
+  $("#ballotButton").setAttribute("aria-label", `我的投票，当前 ${state.ballot.gameIds.length}/3`);
 }
 
 function renderAccessibleIndex() {
@@ -3418,20 +3452,56 @@ function updateHeader() {
   $("#mapLoading").hidden = true;
 }
 
-function showNavigationHint() {
+const NAVIGATION_GUIDE = {
+  orient: ["校准视野", "拖动观察星空"],
+  select: ["锁定信号", "点击一颗微弱天体"],
+  approach: ["推进观测", "滚轮或双指推进，靠近已锁定信号"],
+  open: ["内容已显现", "再次点击行星，或选择“查看游戏”"]
+};
+
+function showNavigationHint(stage = state.navigationGuideStage) {
+  if (!state.games.length) return;
   const hint = $("#navigationHint");
+  const copy = NAVIGATION_GUIDE[stage] || NAVIGATION_GUIDE.orient;
+  state.navigationGuideStage = stage;
+  state.navigationGuideActive = true;
+  $("#navigationHintStep").textContent = copy[0];
+  $("#navigationHintText").textContent = copy[1];
+  $("#navigationHelp").setAttribute("aria-expanded", "true");
   hint.hidden = false;
   requestAnimationFrame(() => hint.classList.add("visible"));
-  clearTimeout(state.navigationHintTimer);
-  state.navigationHintTimer = setTimeout(dismissNavigationHint, state.reducedMotion ? 1800 : 6500);
 }
 
-function dismissNavigationHint() {
+function dismissNavigationHint(force = false) {
+  if (state.navigationGuideActive && !force) return;
   const hint = $("#navigationHint");
   if (!hint || hint.hidden) return;
   clearTimeout(state.navigationHintTimer);
   hint.classList.remove("visible");
+  $("#navigationHelp").setAttribute("aria-expanded", "false");
   setTimeout(() => { hint.hidden = true; }, state.reducedMotion ? 0 : 260);
+}
+
+function toggleNavigationHelp() {
+  if (state.navigationGuideActive) {
+    state.navigationGuideActive = false;
+    dismissNavigationHint(true);
+    return;
+  }
+  const game = state.gameById.get(state.targetId || state.selectedTargetId);
+  const stage = !game ? "orient" : proximitySnapshot(game).level === "source" ? "open" : "approach";
+  showNavigationHint(stage);
+}
+
+function updateEmptyObservatory() {
+  const empty = !state.games.length;
+  $("#emptyObservatory").hidden = !empty;
+  $("#navigationHelp").hidden = empty;
+  $("#searchButton").disabled = empty;
+  $("#routeButton").disabled = empty;
+  $("#resetViewButton").disabled = empty;
+  $("#zoomIn").disabled = empty;
+  $("#zoomOut").disabled = empty;
 }
 
 function launchObservatory() {
@@ -3444,7 +3514,7 @@ function launchObservatory() {
     poster.hidden = true;
     poster.classList.remove("opening");
     state.canvas.focus();
-    showNavigationHint();
+    if (state.games.length) showNavigationHint("orient");
     if (state.deepLinkId && state.gameById.has(state.deepLinkId)) {
       setTarget(state.deepLinkId);
       navigateToGame(state.deepLinkId, 1.25);
@@ -3472,6 +3542,7 @@ function bindUI() {
   $("#shareGame").addEventListener("click", shareCurrentGame);
   $("#detailVote").addEventListener("click", () => state.detailId && toggleVote(state.detailId));
   $("#searchButton").addEventListener("click", openSearch);
+  $("#navigationHelp").addEventListener("click", toggleNavigationHelp);
   $("#searchInput").addEventListener("input", (event) => renderSearch(event.target.value));
   $("#routeButton").addEventListener("click", startRoute);
   $("#routePause").addEventListener("click", toggleRoutePause);
@@ -3677,6 +3748,7 @@ async function loadApplication() {
     updateAccountUI();
     renderAccessibleIndex();
     renderResults();
+    updateEmptyObservatory();
   } catch (error) {
     const loading = $("#mapLoading");
     loading.hidden = false;

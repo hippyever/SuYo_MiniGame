@@ -74,7 +74,16 @@ apt install -y certbot python3-certbot-nginx
 certbot --nginx -d play.example.com -d admin.example.com
 ```
 
-Nginx 模板允许最大 320MB 请求体，和默认视频上传限制匹配。
+Nginx 模板允许最大 2200MB 请求体，覆盖 2GB 作品文件与 multipart 额外开销。上传接口关闭请求缓冲，文件会直接流向 Node 与持久化目录，避免 Nginx 先完整落盘。
+
+多人同时上传时，应用默认把单条上传限制在 150Mbit/s，并将总上传带宽控制在 180Mbit/s：
+
+```env
+UPLOAD_PER_REQUEST_MBIT=150
+UPLOAD_TOTAL_MBIT=180
+```
+
+应用会按当前活跃上传数动态均分 `UPLOAD_TOTAL_MBIT`。Nginx 同时把单个 IP 的上传连接限制为 2 条，降低单个用户以多连接挤占带宽的可能。修改后需要重启服务并重新加载 Nginx。
 
 ## 访问
 
@@ -116,9 +125,9 @@ cp -a /var/lib/suyo-minigame/uploads /var/backups/suyo-minigame/uploads
 
 检查 SMTP 主机、端口、加密方式、账号、授权码和发件人地址是否匹配，然后查看 systemd 日志。部分邮箱服务需要先在后台开启 SMTP。
 
-### 视频上传失败
+### 视频或作品文件上传失败
 
-确认 Nginx `client_max_body_size`、Node 的 `MAX_VIDEO_MB` 和云服务器磁盘空间。大文件上传期间不要关闭后台页面。
+确认 Nginx `client_max_body_size`、Node 的 `MAX_VIDEO_MB`、`MAX_GAME_FILE_MB` 和云服务器磁盘空间。大文件上传期间不要关闭页面，也不要集中在比赛结束前 1 小时上传。
 
 ### 502 Bad Gateway
 

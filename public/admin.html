@@ -90,7 +90,7 @@
                   <dl><div><dt>固定坐标</dt><dd id="planetCoordinate">保存作品后生成</dd></div><div><dt>形态种子</dt><dd id="planetSeed">保存作品后生成</dd></div></dl>
                   <button class="text-action" id="regeneratePlanet" type="button" disabled>重新生成天体</button>
                 </section>
-                <label class="admin-field"><span>下载地址</span><input name="downloadUrl" type="url" placeholder="https://" /></label>
+                <label class="admin-field"><span>作品文件</span><input name="gameFile" type="file" accept=".zip,.7z,.rar,application/zip,application/x-7z-compressed,application/vnd.rar" /><small>支持 ZIP、7Z、RAR，单个文件不超过 2GB。未选择时保留当前文件。</small></label>
                 <label class="admin-field"><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
                 <label class="admin-field"><span>公开演示地址</span><input name="videoExternalUrl" type="url" placeholder="直链或哔哩哔哩、腾讯视频、YouTube 页面" /></label>
                 <label class="admin-field"><span>本地封面</span><input name="cover" type="file" accept="image/*" /></label>
@@ -145,7 +145,7 @@
 
         <section class="admin-block" id="auditAdmin">
           <div class="admin-block-head">
-            <div><h2>完整审计记录</h2><p>永久查询作品修改、成员权限、素材元数据、下载地址前后值、选票与管理员操作。</p></div>
+            <div><h2>完整审计记录</h2><p>永久查询作品修改、成员权限、素材元数据、作品文件前后版本、选票与管理员操作。</p></div>
             <form class="admin-block-actions" id="auditFilterForm">
               <label class="admin-search"><span>作品</span><select id="auditGameFilter" name="gameId"><option value="">全部作品</option></select></label>
               <label class="admin-search"><span>邮箱</span><input name="email" type="email" placeholder="参与者邮箱" /></label>

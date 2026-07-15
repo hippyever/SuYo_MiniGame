@@ -3,12 +3,13 @@
 play.example.com, admin.example.com {
     encode zstd gzip
     request_body {
-        max_size 320MB
+        max_size 2200MB
     }
     reverse_proxy 127.0.0.1:3000 {
+        flush_interval -1
         transport http {
-            read_timeout 10m
-            write_timeout 10m
+            read_timeout 60m
+            write_timeout 60m
         }
     }
 }

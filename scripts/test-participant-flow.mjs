@@ -40,7 +40,6 @@ function workForm(game, overrides = {}) {
     tags: "模拟，探索",
     coverUrl: game.coverUrl || "",
     videoExternalUrl: game.videoExternalUrl || "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    downloadUrl: game.downloadUrl || "https://example.com/game-v1.zip",
     ...overrides
   };
   const form = new FormData();
@@ -65,14 +64,22 @@ let game = result.body.game;
 assert.equal(game.status, "draft");
 assert.equal(game.ownerEmail, ownerEmail);
 
+const oversizedCoverForm = workForm(game);
+oversizedCoverForm.set("cover", new Blob([Buffer.alloc(1024 * 1024 + 1)], { type: "image/png" }), "too-large.png");
+result = await request(`/api/participant/games/${game.id}`, { cookie: ownerCookie, method: "PUT", body: oversizedCoverForm });
+assert.equal(result.response.status, 413);
+
 const mediaForm = workForm(game);
 mediaForm.set("cover", new Blob([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")], { type: "image/png" }), "cover.png");
 mediaForm.set("video", new Blob([Buffer.from("test-webm-payload")], { type: "video/webm" }), "demo.webm");
+mediaForm.set("gameFile", new Blob([Buffer.from("game-v1")], { type: "application/zip" }), "game-v1.zip");
 result = await request(`/api/participant/games/${game.id}`, { cookie: ownerCookie, method: "PUT", body: mediaForm });
 assert.equal(result.response.status, 200);
 game = result.body.game;
 assert.match(game.coverUrl, /^\/uploads\//);
 assert.match(game.uploadedVideoUrl, /^\/uploads\//);
+assert.match(game.downloadUrl, /^\/uploads\/game-/);
+assert.equal(game.gameFileMeta.originalName, "game-v1.zip");
 assert.equal(game.videoExternalUrl, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
 result = await request(`/api/participant/games/${game.id}/members`, {
@@ -129,6 +136,10 @@ assert.equal(result.response.status, 403);
 result = await request("/api/site");
 const publicGame = result.body.games.find((item) => item.id === game.id);
 assert.equal(publicGame.creators.find((creator) => creator.id === member.creatorId)?.contribution, contribution);
+assert.equal(publicGame.downloadUrl, `/api/games/${encodeURIComponent(game.id)}/download`);
+result = await request(publicGame.downloadUrl);
+assert.equal(result.response.status, 200);
+assert.match(result.response.headers.get("content-disposition") || "", /attachment/);
 
 result = await request(`/api/participant/games/${game.id}/withdraw`, { cookie: memberCookie, method: "POST" });
 assert.equal(result.response.status, 403);
@@ -179,18 +190,22 @@ result = await request("/api/admin/settings", {
 });
 assert.equal(result.response.status, 200);
 
+const lateFileForm = workForm(game);
+lateFileForm.set("gameFile", new Blob([Buffer.from("game-v2")], { type: "application/zip" }), "game-v2.zip");
 result = await request(`/api/participant/games/${game.id}`, {
   cookie: ownerCookie,
   method: "PUT",
-  body: workForm(game, { downloadUrl: "https://example.com/game-v2.zip" })
+  body: lateFileForm
 });
 assert.equal(result.response.status, 409);
 assert.equal(result.body.error, "LATE_DOWNLOAD_CONFIRM_REQUIRED");
 
+const confirmedLateFileForm = workForm(game, { confirmLateDownload: "true" });
+confirmedLateFileForm.set("gameFile", new Blob([Buffer.from("game-v2")], { type: "application/zip" }), "game-v2.zip");
 result = await request(`/api/participant/games/${game.id}`, {
   cookie: ownerCookie,
   method: "PUT",
-  body: workForm(game, { downloadUrl: "https://example.com/game-v2.zip", confirmLateDownload: "true" })
+  body: confirmedLateFileForm
 });
 assert.equal(result.response.status, 200);
 game = result.body.game;
@@ -216,24 +231,26 @@ result = await request("/api/admin/dashboard", { admin: true });
 const stored = result.body.games.find((item) => item.id === game.id);
 assert.match(stored.assetMeta.cover.sha256, /^[a-f0-9]{64}$/);
 assert.match(stored.assetMeta.video.sha256, /^[a-f0-9]{64}$/);
-assert.equal(stored.downloadHistory.at(-1).before, "https://example.com/game-v1.zip");
-assert.equal(stored.downloadHistory.at(-1).after, "https://example.com/game-v2.zip");
+assert.equal(stored.assetMeta.gameFile.originalName, "game-v2.zip");
+assert.match(stored.downloadHistory.at(-1).before, /^\/uploads\/game-/);
+assert.match(stored.downloadHistory.at(-1).after, /^\/uploads\/game-/);
 
 result = await request(`/api/admin/audit?gameId=${encodeURIComponent(game.id)}&limit=500`, { admin: true });
 assert.ok(result.body.audit.some((item) => item.action === "game_marked_late"));
 assert.ok(result.body.audit.some((item) => item.action === "team_member_removed"));
 
+const secondGameForm = workForm(secondGame, {
+  title: "潮汐余波",
+  team: "潮汐小组",
+  description: "一款关于潮汐锁定与信号回声的短篇游戏。",
+  coverUrl: "https://example.com/tide-cover.png",
+  videoExternalUrl: "https://www.bilibili.com/video/BV1xx411c7mD"
+});
+secondGameForm.set("gameFile", new Blob([Buffer.from("tide-game")], { type: "application/x-7z-compressed" }), "tide.7z");
 result = await request(`/api/participant/games/${secondGame.id}`, {
   cookie: memberCookie,
   method: "PUT",
-  body: workForm(secondGame, {
-    title: "潮汐余波",
-    team: "潮汐小组",
-    description: "一款关于潮汐锁定与信号回声的短篇游戏。",
-    coverUrl: "https://example.com/tide-cover.png",
-    videoExternalUrl: "https://www.bilibili.com/video/BV1xx411c7mD",
-    downloadUrl: "https://example.com/tide.zip"
-  })
+  body: secondGameForm
 });
 assert.equal(result.response.status, 200);
 secondGame = result.body.game;

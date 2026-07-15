@@ -189,6 +189,7 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
 .workspace-state { display: grid; justify-items: end; gap: 4px; }
 .workspace-state strong { color: var(--signal); font: 800 1rem/1.2 var(--font-mono); }
 .workspace-state span { color: var(--muted); font: 600 .68rem/1.4 var(--font-mono); }
+.workspace-state #requirementSummary { color: var(--ink); font-weight: 720; }
 .workspace-state[data-late="true"] strong { color: var(--danger); }
 
 .workspace-nav { position: sticky; top: 72px; z-index: 10; display: flex; gap: 28px; overflow-x: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--space) 94%, transparent); backdrop-filter: blur(14px); }
@@ -204,6 +205,13 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px clamp(26px, 5vw, 74px); }
 .critical-field { border-left: 2px solid var(--signal); padding-left: 18px; }
 .critical-field[data-late="true"] { border-color: var(--danger); }
+.game-file-field { gap: 9px; }
+.game-file-field .upload-advisory { border-left: 2px solid var(--danger); margin-top: 3px; padding: 9px 12px; color: var(--ink); background: color-mix(in srgb, var(--danger) 9%, transparent); line-height: 1.65; }
+.game-file-field progress { width: 100%; height: 8px; margin-top: 5px; border: 0; border-radius: 0; overflow: hidden; color: var(--signal); background: var(--surface-2); }
+.game-file-field progress::-webkit-progress-bar { background: var(--surface-2); }
+.game-file-field progress::-webkit-progress-value { background: var(--signal); }
+.game-file-field progress::-moz-progress-bar { background: var(--signal); }
+#gameFileProgressLabel { color: var(--signal); font-family: var(--font-mono); }
 
 .save-dock { position: sticky; bottom: 14px; z-index: 9; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 18px; width: min(760px, calc(100% - 24px)); margin: -22px auto 22px; border: 1px solid var(--line-strong); padding: 14px 16px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: 0 18px 50px var(--shadow); backdrop-filter: blur(18px); }
 .save-dock > div { display: grid; }
@@ -275,6 +283,10 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
   .submission-event span { display: none; }
   .submission-account { grid-column: 1 / -1; justify-content: flex-end; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
   .submission-shell { padding: 26px 16px 80px; }
+  .submission-auth { grid-template-areas: "copy" "visual" "form"; }
+  .auth-observatory { width: min(48vw, 176px); margin: -8px 0 -18px; justify-self: end; }
+  .auth-copy { padding: 8px 0 0; }
+  .auth-copy span { margin-top: 12px; }
   .submission-auth form { grid-template-columns: 1fr; }
   .submission-auth form .wide { grid-column: auto; }
   .auth-copy h1, .draft-origin h1, .workspace-heading h1 { font-size: clamp(2.4rem, 12vw, 4.4rem); }

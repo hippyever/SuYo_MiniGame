@@ -11,7 +11,7 @@
     <meta property="og:image" content="/assets/suyo-studio.png" />
     <title>溯造 MiniGame 游戏开发大赛</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/observatory.css?v=20260714t" />
+    <link rel="stylesheet" href="/observatory.css?v=20260715v" />
   </head>
   <body class="observatory-body">
     <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
@@ -33,9 +33,9 @@
           <time id="deadlineLabel"></time>
         </div>
         <div class="account-actions">
-          <a class="plain-action participant-entry" href="/submit">提交参展</a>
+          <a class="plain-action participant-entry" href="/submit" aria-label="提交参展">提交参展</a>
           <button class="plain-action" id="loginButton" type="button">登录</button>
-          <button class="primary-action compact" id="ballotButton" type="button">我的投票 <span id="ballotCount">0/3</span></button>
+          <button class="primary-action compact" id="ballotButton" type="button"><span class="ballot-label">我的投票</span> <span id="ballotCount">0/3</span></button>
         </div>
       </header>
 
@@ -44,7 +44,21 @@
         <strong><span id="visitedCount">0</span>/<span id="gameCount">0</span> 已查看</strong>
       </section>
 
-      <div class="navigation-hint" id="navigationHint" hidden>左键或单指旋转 <i></i> 滚轮或双指深入 <i></i> 中键或双指侧移</div>
+      <div class="navigation-hint" id="navigationHint" hidden>
+        <span id="navigationHintStep">校准视野</span>
+        <strong id="navigationHintText">拖动观察星空</strong>
+      </div>
+      <button class="navigation-help" id="navigationHelp" type="button" aria-expanded="false">操作说明</button>
+
+      <section class="empty-observatory" id="emptyObservatory" hidden aria-labelledby="emptyObservatoryTitle">
+        <div class="empty-signal" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div>
+          <p>观测站尚未接收到作品信号</p>
+          <h2 id="emptyObservatoryTitle">共享宇宙正在等待第一颗行星</h2>
+          <span>首个作品提交后，它会在所有探索者的相同坐标中显现。</span>
+        </div>
+        <a class="secondary-action" href="/submit">提交首个作品</a>
+      </section>
 
       <section class="target-console" id="targetConsole" hidden aria-live="polite">
         <div class="target-coordinate">
@@ -83,10 +97,10 @@
       </section>
 
       <nav class="observer-toolbar" id="observerToolbar" aria-label="观测工具">
-        <button type="button" id="searchButton">搜索作品</button>
-        <button type="button" id="routeButton">自动浏览全部作品</button>
-        <button type="button" id="resetViewButton">全景观测</button>
-        <button type="button" id="performanceButton" aria-pressed="false">节能模式</button>
+        <button type="button" id="searchButton"><span class="desktop-label">搜索作品</span><span class="mobile-label">搜索</span></button>
+        <button type="button" id="routeButton"><span class="desktop-label">自动浏览全部作品</span><span class="mobile-label">自动巡航</span></button>
+        <button type="button" id="resetViewButton"><span class="desktop-label">全景观测</span><span class="mobile-label">返回全景</span></button>
+        <button type="button" id="performanceButton" aria-pressed="false"><span class="desktop-label">节能模式</span><span class="mobile-label">画质</span></button>
       </nav>
 
       <div class="zoom-controls" aria-label="前后航行控制">
@@ -227,10 +241,10 @@
     <dialog class="station-dialog auth-dialog" id="authDialog">
       <form class="dialog-frame" id="authForm" novalidate>
         <header>
-          <div><span>投票身份</span><h2>登录后继续</h2></div>
+          <div><span>投票身份</span><h2 id="authTitle">登录投票身份</h2></div>
           <button class="plain-action" id="closeAuth" type="button">关闭</button>
         </header>
-        <p class="dialog-intro">浏览无需登录。投票前使用邮箱验证码确认身份，之后可以随时修改选票。</p>
+        <p class="dialog-intro" id="authIntro">浏览无需登录。验证一次后，即可在投票截止前随时修改选票。</p>
         <div class="identity-grid">
           <label class="field-block"><span>姓名</span><input id="authName" name="name" maxlength="30" autocomplete="name" required /></label>
           <label class="field-block"><span>队伍</span><input id="authTeam" name="team" maxlength="50" autocomplete="organization" required /></label>
@@ -305,6 +319,9 @@
         <p id="ceremonyEyebrow">可能性核心提取</p>
         <h2 id="ceremonyTitle">稳定作品信号</h2>
         <p id="ceremonyStatus">持续按住三秒，从作品行星中提取可能性核心。</p>
+        <div class="ceremony-steps" id="ceremonySteps" aria-label="投票仪式步骤">
+          <span data-ritual-step="extract" aria-current="step">长按提取</span><i aria-hidden="true">→</i><span data-ritual-step="orbit">点击入轨</span>
+        </div>
         <button class="extract-hold" id="extractHold" type="button" aria-describedby="ceremonyStatus" aria-label="持续按住三秒提取可能性核心">
           <span><b id="extractProgress">0%</b><small>持续按住</small></span>
         </button>
@@ -340,6 +357,6 @@
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
     <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
-    <script src="/app.js?v=20260714t" defer></script>
+    <script src="/app.js?v=20260715v" defer></script>
   </body>
 </html>

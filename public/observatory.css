@@ -353,7 +353,7 @@ canvas:focus-visible {
   z-index: 9;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border-top: 1px solid var(--line-strong);
   padding: 10px 14px;
   color: var(--muted);
@@ -366,17 +366,104 @@ canvas:focus-visible {
   white-space: nowrap;
 }
 
+.navigation-hint > span {
+  color: var(--signal);
+  font-weight: 760;
+  letter-spacing: .08em;
+}
+
+.navigation-hint > strong {
+  color: var(--ink);
+  font-weight: 680;
+}
+
 .navigation-hint.visible {
   opacity: 1;
   transform: translate(-50%, 0);
 }
 
-.navigation-hint i {
-  width: 3px;
-  height: 3px;
+.navigation-help {
+  position: absolute;
+  right: 22px;
+  bottom: calc(var(--safe-bottom) + 62px);
+  z-index: 9;
+  min-height: 34px;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 0 2px;
+  color: var(--muted);
+  background: transparent;
+  font: 650 .65rem/1 var(--font-mono);
+}
+
+.navigation-help:hover,
+.navigation-help[aria-expanded="true"] {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+.empty-observatory {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 8;
+  width: min(760px, calc(100% - 40px));
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(20px, 4vw, 54px);
+  transform: translate(-50%, -48%);
+}
+
+.empty-observatory[hidden] { display: none; }
+
+.empty-observatory p {
+  margin: 0 0 8px;
+  color: var(--signal);
+  font: 700 .66rem/1.35 var(--font-mono);
+  letter-spacing: .08em;
+}
+
+.empty-observatory h2 {
+  max-width: 12ch;
+  margin: 0;
+  font: 800 clamp(2rem, 4.4vw, 4.4rem)/.92 var(--font-display);
+  letter-spacing: -.055em;
+}
+
+.empty-observatory > div:nth-child(2) > span {
   display: block;
+  max-width: 42ch;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.65;
+}
+
+.empty-signal {
+  position: relative;
+  width: 146px;
+  aspect-ratio: 1;
+}
+
+.empty-signal i {
+  position: absolute;
+  inset: 50%;
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
-  background: var(--signal);
+  transform: translate(-50%, -50%);
+}
+
+.empty-signal i:nth-child(1) { width: 22px; height: 22px; border-color: var(--signal); background: color-mix(in srgb, var(--signal) 18%, transparent); box-shadow: 0 0 30px color-mix(in srgb, var(--signal) 28%, transparent); }
+.empty-signal i:nth-child(2) { width: 82px; height: 42px; transform: translate(-50%, -50%) rotate(-17deg); }
+.empty-signal i:nth-child(3) { width: 142px; height: 62px; transform: translate(-50%, -50%) rotate(23deg); opacity: .55; }
+
+.mobile-label { display: none; }
+
+.observer-toolbar button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: .42;
 }
 
 .target-console {
@@ -2456,6 +2543,28 @@ canvas:focus-visible {
   line-height: 1.7;
 }
 
+.ceremony-steps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font: 700 .64rem/1 var(--font-mono);
+  letter-spacing: .06em;
+}
+
+.ceremony-steps span {
+  border-bottom: 1px solid var(--line-strong);
+  padding: 7px 0;
+  transition: color 180ms ease, border-color 180ms ease;
+}
+
+.ceremony-steps span[aria-current="step"] {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+.ceremony-steps i { color: var(--line-strong); font-style: normal; }
+
 .extract-hold {
   width: 152px;
   height: 152px;
@@ -2820,7 +2929,7 @@ canvas:focus-visible {
   }
 
   .brand-button {
-    width: 132px;
+    width: 104px;
     height: 34px;
   }
 
@@ -2830,7 +2939,8 @@ canvas:focus-visible {
 
   .plain-action#loginButton {
     min-height: 40px;
-    padding-inline: 10px;
+    padding-inline: 8px;
+    font-size: .7rem;
   }
 
   .account-actions {
@@ -2850,8 +2960,11 @@ canvas:focus-visible {
 
   .account-actions .compact {
     min-height: 40px;
-    padding-inline: 10px;
+    padding-inline: 8px;
   }
+
+  .compact .ballot-label { margin-left: 0; font-size: 0; }
+  .compact .ballot-label::after { content: "投票"; font-size: .7rem; }
 
   .map-status {
     top: calc(var(--safe-top) + 66px);
@@ -2863,16 +2976,50 @@ canvas:focus-visible {
     right: 18px;
     bottom: calc(var(--safe-bottom) + 66px);
     left: 18px;
-    justify-content: center;
+    justify-content: space-between;
     font-size: 0.61rem;
     transform: translateY(12px);
   }
+
+  .navigation-help {
+    right: 12px;
+    bottom: calc(var(--safe-bottom) + 58px);
+  }
+
+  .empty-observatory {
+    width: calc(100% - 32px);
+    grid-template-columns: 88px 1fr;
+    gap: 18px;
+  }
+
+  .empty-observatory .secondary-action { grid-column: 2; justify-self: start; }
+  .empty-signal { width: 86px; }
+  .empty-signal i:nth-child(2) { width: 58px; height: 30px; }
+  .empty-signal i:nth-child(3) { width: 86px; height: 42px; }
+  .empty-observatory h2 { font-size: clamp(1.75rem, 8vw, 2.8rem); }
+  .empty-observatory > div:nth-child(2) > span { margin-top: 10px; font-size: .72rem; }
 
   .navigation-hint.visible {
     transform: translateY(0);
   }
 
   .target-active .navigation-hint {
+    top: calc(var(--safe-top) + 66px);
+    right: 12px;
+    bottom: auto;
+    left: auto;
+    width: min(210px, calc(100% - 172px));
+    display: grid;
+    justify-content: stretch;
+    transform: translateY(-8px);
+    white-space: normal;
+  }
+
+  .target-active .navigation-hint.visible {
+    transform: translateY(0);
+  }
+
+  .target-active .navigation-help {
     display: none;
   }
 
@@ -2929,6 +3076,9 @@ canvas:focus-visible {
     padding-inline: 8px;
     font-size: 0.68rem;
   }
+
+  .desktop-label { display: none; }
+  .mobile-label { display: inline; }
 
   .zoom-controls {
     right: 12px;
@@ -3234,9 +3384,13 @@ canvas:focus-visible {
 
   .ceremony-console h2 {
     max-width: none;
-    font-size: clamp(2rem, 9.5vw, 3.35rem);
+    font-size: clamp(1.9rem, 8.4vw, 3rem);
+    overflow-wrap: normal;
+    word-break: keep-all;
     line-height: .92;
   }
+
+  .ceremony-steps { position: sticky; top: 0; z-index: 2; width: max-content; padding: 2px 0; background: var(--space); }
 
   .ceremony-console > #ceremonyStatus {
     max-width: 40ch;

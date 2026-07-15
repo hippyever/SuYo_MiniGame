@@ -43,6 +43,36 @@ async function api(url, options = {}) {
   return result;
 }
 
+function formatBytes(value) {
+  const bytes = Math.max(0, Number(value || 0));
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)}GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)}MB`;
+  return `${Math.ceil(bytes / 1024)}KB`;
+}
+
+function uploadApi(url, { method, body, onProgress }) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(method, url);
+    request.setRequestHeader("accept", "application/json");
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    });
+    request.addEventListener("load", () => {
+      let result;
+      try { result = JSON.parse(request.responseText); }
+      catch { result = { ok: false, message: "服务器返回了无法识别的响应。" }; }
+      if (request.status >= 200 && request.status < 300 && result.ok !== false) return resolve(result);
+      const error = new Error(result.message || "请求失败。");
+      Object.assign(error, result, { status: request.status });
+      reject(error);
+    });
+    request.addEventListener("error", () => reject(new Error("网络连接中断。请保留页面并重新上传。")));
+    request.addEventListener("abort", () => reject(new Error("上传已取消。")));
+    request.send(body);
+  });
+}
+
 function showOnly(id) {
   for (const selector of ["authPanel", "workspaceLoading", "draftOrigin", "participantWorkspace"]) $(`#${selector}`).hidden = selector !== id;
 }
@@ -65,13 +95,19 @@ function fillGameForm() {
   const game = state.game;
   const form = $("#gameForm");
   form.elements.revision.value = game.revision || 1;
-  for (const name of ["title", "team", "shortDescription", "description", "creationNote", "tags", "downloadUrl", "videoExternalUrl"]) {
+  for (const name of ["title", "team", "shortDescription", "description", "creationNote", "tags", "videoExternalUrl"]) {
     const value = name === "tags" ? (game.tags || []).join("，") : game[name] || "";
     form.elements[name].value = value;
   }
   form.elements.coverUrl.value = String(game.coverUrl || "").startsWith("http") ? game.coverUrl : "";
+  form.elements.gameFile.value = "";
   $("#coverCurrent").textContent = game.coverUrl ? `当前封面：${String(game.coverUrl).startsWith("/uploads/") ? "已上传文件" : "外部地址"}` : "尚未上传";
   $("#videoCurrent").textContent = game.uploadedVideoUrl ? "当前优先使用已上传视频" : game.videoExternalUrl ? "当前使用公开视频链接" : "单个文件不超过 200MB";
+  $("#gameFileCurrent").textContent = game.gameFileMeta
+    ? `当前文件：${game.gameFileMeta.originalName || "已上传作品包"}，${formatBytes(game.gameFileMeta.size)}`
+    : game.downloadUrl
+      ? "当前作品仍使用旧版外部地址。选择压缩包并保存后将替换为上传文件。"
+      : "支持 ZIP、7Z、RAR，单个文件不超过 2GB。";
   $("#updatedAtLabel").textContent = `最后保存：${formatDate(game.updatedAt)}`;
   state.dirty = false;
   updateDirtyState();
@@ -83,12 +119,16 @@ function renderHeader() {
   $("#workspaceTeam").textContent = game.team || "队伍名称尚未填写";
   $("#statusLabel").textContent = statusText(game);
   $("#roleLabel").textContent = roleText(game);
+  const missingCount = (game.missingFields || []).length;
+  $("#requirementSummary").textContent = game.status === "submitted"
+    ? "当前版本已公开，可继续更新作品资料"
+    : missingCount
+      ? `尚未公开，提交前还差 ${missingCount} 项`
+      : "资料已齐全，可以提交参展";
   $("#deadlineLabel").textContent = `提交截止：${formatDate(game.submissionEndAt)}`;
   $(".workspace-state").dataset.late = game.lateSubmission ? "true" : "false";
   $(".critical-field").dataset.late = game.afterSubmissionDeadline ? "true" : "false";
-  $("#downloadNotice").textContent = game.afterSubmissionDeadline
-    ? "提交截止时间已过。修改游戏下载地址会永久产生补交标记，需要再次确认。"
-    : `提交截止：${formatDate(game.submissionEndAt)}。截止后修改会产生补交标记。`;
+  $("#gameFileCurrent").dataset.late = game.afterSubmissionDeadline ? "true" : "false";
 }
 
 function memberStatus(member) {
@@ -124,7 +164,7 @@ function renderSubmission() {
   const game = state.game;
   const requirements = [
     ["游戏名称", Boolean(game.title)], ["游戏简介", Boolean(game.description)], ["游戏封面", Boolean(game.coverUrl)],
-    ["演示视频", Boolean(game.uploadedVideoUrl || game.videoExternalUrl)], ["游戏下载地址", Boolean(game.downloadUrl)],
+    ["演示视频", Boolean(game.uploadedVideoUrl || game.videoExternalUrl)], ["作品文件", Boolean(game.downloadUrl)],
     ["队伍名称", Boolean(game.team)], ["制作人员", Boolean((game.creators || []).length)]
   ];
   $("#submissionChecks").innerHTML = requirements.map(([label, ready]) => `<div class="submission-check" data-ready="${ready}"><strong>${escapeHTML(label)}</strong><span>${ready ? "已完成" : "待补充"}</span></div>`).join("");
@@ -258,28 +298,60 @@ async function saveGameDetails(event, { quiet = false } = {}) {
     setMessage($("#gameMessage"), "演示视频不能超过 200MB。", true);
     return false;
   }
+  const gameFile = form.elements.gameFile.files[0];
+  const maxGameFileBytes = Number(state.workspace?.settings?.maxGameFileBytes || 2 * 1024 ** 3);
+  if (gameFile && gameFile.size > maxGameFileBytes) {
+    setMessage($("#gameMessage"), `作品文件不能超过 ${formatBytes(maxGameFileBytes)}。`, true);
+    return false;
+  }
+  if (gameFile && !/\.(zip|7z|rar)$/i.test(gameFile.name)) {
+    setMessage($("#gameMessage"), "作品文件仅支持 ZIP、7Z 或 RAR 压缩包。", true);
+    return false;
+  }
   const data = new FormData(form);
   if (!form.elements.cover.files[0] && !form.elements.coverUrl.value && state.game.coverUrl) data.set("coverUrl", state.game.coverUrl);
-  const downloadChanged = String(form.elements.downloadUrl.value || "").trim() !== String(state.game.downloadUrl || "").trim();
+  const downloadChanged = Boolean(gameFile);
   if (downloadChanged && state.game.afterSubmissionDeadline && state.game.firstSubmittedAt) {
-    const accepted = await confirmAction({ eyebrow: "补交判定", title: "确认修改游戏下载地址？", description: "提交截止时间已过。保存后作品会永久显示补交标记，即使改回原地址也不会自动消除。", accept: "确认修改地址" });
+    const accepted = await confirmAction({ eyebrow: "补交判定", title: "确认替换作品文件？", description: "提交截止时间已过。保存后作品会永久显示补交标记，即使再次上传旧版本也不会自动消除。", accept: "确认替换文件" });
     if (!accepted) return false;
     data.set("confirmLateDownload", "true");
   }
   button.disabled = true;
-  if (!quiet) setMessage($("#gameMessage"), "正在写入作品档案...");
+  const progress = $("#gameFileProgress");
+  const progressLabel = $("#gameFileProgressLabel");
+  if (gameFile) {
+    progress.hidden = false;
+    progressLabel.hidden = false;
+    progress.value = 0;
+    progressLabel.textContent = "正在准备上传...";
+  }
+  if (!quiet) setMessage($("#gameMessage"), gameFile ? "正在上传作品文件，请保持页面开启。" : "正在写入作品档案...");
   try {
-    const result = await api(`/api/participant/games/${encodeURIComponent(state.game.id)}`, { method: "PUT", body: data });
+    const result = await uploadApi(`/api/participant/games/${encodeURIComponent(state.game.id)}`, {
+      method: "PUT",
+      body: data,
+      onProgress: (loaded, total) => {
+        if (!gameFile) return;
+        const percent = Math.min(99, Math.round((loaded / total) * 100));
+        progress.value = percent;
+        progressLabel.textContent = `已上传 ${percent}%（${formatBytes(loaded)} / ${formatBytes(total)}）`;
+      }
+    });
+    if (gameFile) {
+      progress.value = 100;
+      progressLabel.textContent = "上传完成，作品档案已保存。";
+    }
     state.game = result.game;
     renderHeader();
     fillGameForm();
     renderTeam();
     renderSubmission();
-    if (!quiet) toast(result.message);
+    if (!quiet) toast(state.game.status === "submitted" ? result.message : "已保存为草稿，作品尚未公开。" );
     return true;
   } catch (error) {
     if (error.game) state.game = error.game;
     setMessage($("#gameMessage"), error.message, true);
+    if (gameFile) progressLabel.textContent = `上传失败：${error.message}`;
     return false;
   } finally {
     button.disabled = false;

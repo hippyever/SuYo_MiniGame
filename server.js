@@ -3,6 +3,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const { Transform } = require("stream");
 const { pipeline } = require("stream/promises");
 const { URL } = require("url");
 const Busboy = require("busboy");
@@ -30,7 +31,11 @@ const OTP_MAX_REQUESTS_PER_IP_PER_HOUR = Math.max(5, Number(process.env.OTP_MAX_
 const MAX_COVER_BYTES = Math.max(1, Number(process.env.MAX_COVER_MB || 12)) * 1024 * 1024;
 const MAX_AVATAR_BYTES = Math.max(1, Number(process.env.MAX_AVATAR_MB || 4)) * 1024 * 1024;
 const MAX_VIDEO_BYTES = Math.max(10, Number(process.env.MAX_VIDEO_MB || 200)) * 1024 * 1024;
+const MAX_GAME_FILE_BYTES = Math.max(100, Number(process.env.MAX_GAME_FILE_MB || 2048)) * 1024 * 1024;
+const UPLOAD_PER_REQUEST_BYTES_PER_SEC = Math.max(0, Number(process.env.UPLOAD_PER_REQUEST_MBIT || 150)) * 125000;
+const UPLOAD_TOTAL_BYTES_PER_SEC = Math.max(0, Number(process.env.UPLOAD_TOTAL_MBIT || 180)) * 125000;
 const VIDEO_RETENTION_MS = Math.max(1, Number(process.env.VIDEO_RETENTION_DAYS || 7)) * 24 * 60 * 60 * 1000;
+const GAME_FILE_RETENTION_MS = Math.max(1, Number(process.env.GAME_FILE_RETENTION_DAYS || 2)) * 24 * 60 * 60 * 1000;
 const SESSION_TTL_MS = Math.max(1, Number(process.env.SESSION_TTL_DAYS || 30)) * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true"
   || (process.env.SESSION_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
@@ -56,6 +61,61 @@ const staticTypes = {
 
 let writeQueue = Promise.resolve();
 let mailTransport = null;
+
+const activeUploads = new Set();
+
+class FairUploadTransform extends Transform {
+  constructor() {
+    super();
+    this.registered = false;
+    this.nextAvailableAt = Date.now();
+  }
+
+  _transform(chunk, encoding, callback) {
+    if (!this.registered) {
+      this.registered = true;
+      activeUploads.add(this);
+    }
+    const activeCount = Math.max(1, activeUploads.size);
+    const sharedRate = UPLOAD_TOTAL_BYTES_PER_SEC > 0 ? UPLOAD_TOTAL_BYTES_PER_SEC / activeCount : Infinity;
+    const rate = Math.min(UPLOAD_PER_REQUEST_BYTES_PER_SEC || Infinity, sharedRate);
+    if (!Number.isFinite(rate)) return callback(null, chunk);
+    const now = Date.now();
+    const startsAt = Math.max(now, this.nextAvailableAt);
+    this.nextAvailableAt = startsAt + (chunk.length / rate) * 1000;
+    setTimeout(() => callback(null, chunk), Math.max(0, Math.ceil(startsAt - now)));
+  }
+
+  _destroy(error, callback) {
+    activeUploads.delete(this);
+    callback(error);
+  }
+
+  _flush(callback) {
+    activeUploads.delete(this);
+    callback();
+  }
+}
+
+class ByteLimitTransform extends Transform {
+  constructor(limit, message) {
+    super();
+    this.limit = limit;
+    this.message = message;
+    this.bytes = 0;
+  }
+
+  _transform(chunk, encoding, callback) {
+    this.bytes += chunk.length;
+    if (this.bytes > this.limit) {
+      const error = new Error(this.message);
+      error.status = 413;
+      callback(error);
+      return;
+    }
+    callback(null, chunk);
+  }
+}
 
 function randomId() {
   return crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
@@ -332,6 +392,7 @@ function migrateStore(store) {
       uploadedVideoUrl,
       videoExternalUrl,
       videoUrl: uploadedVideoUrl || videoExternalUrl,
+      downloadUrl: cleanAssetUrl(game.downloadUrl),
       assetMeta: game.assetMeta && typeof game.assetMeta === "object" ? game.assetMeta : {},
       assetHistory: Array.isArray(game.assetHistory) ? game.assetHistory : [],
       downloadHistory: Array.isArray(game.downloadHistory) ? game.downloadHistory : [],
@@ -659,7 +720,7 @@ function publicSite(store) {
       coverUrl: game.coverUrl,
       videoUrl: game.videoUrl,
       videoExternalUrl: game.videoExternalUrl || "",
-      downloadUrl: game.downloadUrl,
+      downloadUrl: game.downloadUrl ? `/api/games/${encodeURIComponent(game.id)}/download` : "",
       lateSubmission: Boolean(game.lateSubmission),
       tags: game.tags || [],
       planetSeed: game.planetSeed,
@@ -1235,7 +1296,7 @@ async function parseGameMultipart(req) {
     try {
       busboy = Busboy({
         headers: req.headers,
-        limits: { fields: 60, files: 14, fileSize: Math.max(MAX_COVER_BYTES, MAX_AVATAR_BYTES, MAX_VIDEO_BYTES) }
+        limits: { fields: 60, files: 15, fileSize: Math.max(MAX_COVER_BYTES, MAX_AVATAR_BYTES, MAX_VIDEO_BYTES, MAX_GAME_FILE_BYTES) }
       });
     } catch (error) {
       error.status = 400;
@@ -1250,36 +1311,50 @@ async function parseGameMultipart(req) {
     busboy.on("file", (name, stream, info) => {
       const isCover = name === "cover";
       const isVideo = name === "video";
+      const isGameFile = name === "gameFile";
       const isAvatar = /^avatar-\d{1,2}$/.test(name) || name === "profileAvatar";
-      if ((!isCover && !isVideo && !isAvatar) || !info.filename) {
+      if ((!isCover && !isVideo && !isGameFile && !isAvatar) || !info.filename) {
         stream.resume();
         return;
       }
-      const validType = isCover || isAvatar ? info.mimeType.startsWith("image/") : info.mimeType.startsWith("video/");
+      const gameExtension = path.extname(info.filename || "").toLowerCase();
+      const validType = isCover || isAvatar
+        ? info.mimeType.startsWith("image/")
+        : isVideo
+          ? info.mimeType.startsWith("video/")
+          : [".zip", ".7z", ".rar"].includes(gameExtension);
       if (!validType) {
-        parseError = Object.assign(new Error(isCover ? "封面必须是图片文件。" : isAvatar ? "成员头像必须是图片文件。" : "演示文件必须是视频。"), { status: 400 });
+        parseError = Object.assign(new Error(isCover
+          ? "封面必须是图片文件。"
+          : isAvatar
+            ? "成员头像必须是图片文件。"
+            : isVideo
+              ? "演示文件必须是视频。"
+              : "作品文件仅支持 ZIP、7Z 或 RAR 压缩包。"), { status: 400 });
         stream.resume();
         return;
       }
-      const limit = isCover ? MAX_COVER_BYTES : isAvatar ? MAX_AVATAR_BYTES : MAX_VIDEO_BYTES;
+      const limit = isCover ? MAX_COVER_BYTES : isAvatar ? MAX_AVATAR_BYTES : isVideo ? MAX_VIDEO_BYTES : MAX_GAME_FILE_BYTES;
       let size = 0;
-      let exceeded = false;
       const digest = crypto.createHash("sha256");
-      const filename = `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extensionFor(info.mimeType, info.filename)}`;
+      const kind = isCover ? "cover" : isAvatar ? "avatar" : isVideo ? "video" : "game";
+      const filename = `${kind}-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${isGameFile ? gameExtension : extensionFor(info.mimeType, info.filename)}`;
       const target = path.join(UPLOAD_DIR, filename);
       createdFiles.push(target);
       stream.on("data", (chunk) => {
         size += chunk.length;
         digest.update(chunk);
-        if (size > limit) exceeded = true;
       });
-      const task = pipeline(stream, fs.createWriteStream(target)).then(() => {
-        if (exceeded || stream.truncated) {
-          const error = new Error(isCover
-            ? `封面不能超过 ${Math.round(MAX_COVER_BYTES / 1024 / 1024)}MB。`
-            : isAvatar
-              ? `成员头像不能超过 ${Math.round(MAX_AVATAR_BYTES / 1024 / 1024)}MB。`
-              : `视频不能超过 ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)}MB。`);
+      const limitMessage = isCover
+        ? `封面不能超过 ${Math.round(MAX_COVER_BYTES / 1024 / 1024)}MB。`
+        : isAvatar
+          ? `成员头像不能超过 ${Math.round(MAX_AVATAR_BYTES / 1024 / 1024)}MB。`
+          : isVideo
+            ? `视频不能超过 ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)}MB。`
+            : `作品文件不能超过 ${Math.round(MAX_GAME_FILE_BYTES / 1024 / 1024)}MB。`;
+      const task = pipeline(stream, new ByteLimitTransform(limit, limitMessage), fs.createWriteStream(target)).then(() => {
+        if (stream.truncated) {
+          const error = new Error(limitMessage);
           error.status = 413;
           throw error;
         }
@@ -1299,7 +1374,9 @@ async function parseGameMultipart(req) {
         reject(error);
       }
     });
-    req.pipe(busboy);
+    const fairUpload = new FairUploadTransform();
+    fairUpload.on("error", reject);
+    req.pipe(fairUpload).pipe(busboy);
   });
 }
 
@@ -1384,6 +1461,7 @@ function gameFromFields(fields, files, existing = null, options = {}) {
   const assetMeta = { ...(existing?.assetMeta || {}) };
   if (files.cover) assetMeta.cover = fileAssetMeta(files.cover, options.actorEmail);
   if (files.video) assetMeta.video = fileAssetMeta(files.video, options.actorEmail);
+  if (files.gameFile) assetMeta.gameFile = fileAssetMeta(files.gameFile, options.actorEmail);
   return {
     id: existing?.id || `${title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-|-$/g, "").slice(0, 36) || "game"}-${crypto.randomBytes(3).toString("hex")}`,
     title,
@@ -1396,7 +1474,7 @@ function gameFromFields(fields, files, existing = null, options = {}) {
     uploadedVideoUrl,
     videoExternalUrl,
     videoUrl: uploadedVideoUrl || videoExternalUrl,
-    downloadUrl: hasDownloadUrl ? cleanUrl(fields.downloadUrl) : cleanUrl(existing?.downloadUrl),
+    downloadUrl: files.gameFile?.url || (hasDownloadUrl ? cleanAssetUrl(fields.downloadUrl) : cleanAssetUrl(existing?.downloadUrl)),
     tags,
     featured: fields.featured === "true" || fields.featured === "on",
     published: options.preservePublication ? Boolean(existing?.published) : fields.published === "true" || fields.published === "on",
@@ -1437,6 +1515,7 @@ function gameAuditSnapshot(game) {
     uploadedVideoUrl: game.uploadedVideoUrl || "",
     videoExternalUrl: game.videoExternalUrl || "",
     downloadUrl: game.downloadUrl,
+    gameFileMeta: game.assetMeta?.gameFile || null,
     tags: game.tags || [],
     status: gameStatus(game),
     published: Boolean(game.published),
@@ -1462,7 +1541,7 @@ function submissionMissingFields(game) {
   if (!cleanText(game.description, 1200)) missing.push("游戏简介");
   if (!cleanAssetUrl(game.coverUrl)) missing.push("游戏封面");
   if (!cleanAssetUrl(game.uploadedVideoUrl) && !cleanUrl(game.videoExternalUrl)) missing.push("演示视频");
-  if (!cleanUrl(game.downloadUrl)) missing.push("游戏下载地址");
+  if (!cleanAssetUrl(game.downloadUrl)) missing.push("作品文件");
   if (!normalizeCreators(game.creators).length) missing.push("制作人员");
   return missing;
 }
@@ -1494,6 +1573,11 @@ function scheduleReplacedAssets(store, existing, updated, files, actorEmail = ""
   if (files.cover && existing.assetMeta?.cover) updated.assetHistory.push({ kind: "cover", ...existing.assetMeta.cover, replacedAt: now });
   if ((files.video || existing.uploadedVideoUrl !== updated.uploadedVideoUrl) && existing.assetMeta?.video) {
     const retired = { kind: "video", ...existing.assetMeta.video, replacedAt: now, deleteAfter: new Date(Date.now() + VIDEO_RETENTION_MS).toISOString() };
+    updated.assetHistory.push(retired);
+    if (retired.url?.startsWith("/uploads/")) store.retiredAssets.push(retired);
+  }
+  if (files.gameFile && existing.assetMeta?.gameFile) {
+    const retired = { kind: "gameFile", ...existing.assetMeta.gameFile, replacedAt: now, deleteAfter: new Date(Date.now() + GAME_FILE_RETENTION_MS).toISOString() };
     updated.assetHistory.push(retired);
     if (retired.url?.startsWith("/uploads/")) store.retiredAssets.push(retired);
   }
@@ -1548,6 +1632,7 @@ async function handleParticipantWorkspace(req, res) {
       votingEndAt: store.settings.endAt,
       timeZone: TZ,
       maxVideoBytes: MAX_VIDEO_BYTES,
+      maxGameFileBytes: MAX_GAME_FILE_BYTES,
       videoRetentionDays: Math.round(VIDEO_RETENTION_MS / 86400000)
     }
   });
@@ -1630,10 +1715,10 @@ async function handleParticipantUpdateGame(req, res, id) {
       });
       updated.status = gameStatus(existing);
       updated.published = isGamePublic(existing);
-      const downloadChanged = cleanUrl(existing.downloadUrl) !== cleanUrl(updated.downloadUrl);
+      const downloadChanged = cleanAssetUrl(existing.downloadUrl) !== cleanAssetUrl(updated.downloadUrl);
       if (downloadChanged && existing.firstSubmittedAt && isAfterSubmissionDeadline(store.settings)) {
         if (parsed.fields.confirmLateDownload !== "true") {
-          const error = new Error("截止后修改游戏下载地址会永久产生补交标记，请确认后再次保存。");
+          const error = new Error("截止后替换作品文件会永久产生补交标记，请确认后再次保存。");
           error.status = 409;
           error.code = "LATE_DOWNLOAD_CONFIRM_REQUIRED";
           throw error;
@@ -1643,8 +1728,8 @@ async function handleParticipantUpdateGame(req, res, id) {
       if (downloadChanged) {
         updated.downloadHistory = [...(existing.downloadHistory || []), {
           id: randomId(),
-          before: cleanUrl(existing.downloadUrl),
-          after: cleanUrl(updated.downloadUrl),
+          before: cleanAssetUrl(existing.downloadUrl),
+          after: cleanAssetUrl(updated.downloadUrl),
           actorEmail: record.session.email,
           createdAt: new Date().toISOString()
         }];
@@ -2106,8 +2191,8 @@ async function handleAdminUpdateGame(req, res, url, id) {
         game.submittedAt ||= game.firstSubmittedAt;
       }
       scheduleReplacedAssets(store, existing, game, parsed.files, "");
-      if (cleanUrl(existing.downloadUrl) !== cleanUrl(game.downloadUrl)) {
-        game.downloadHistory = [...(existing.downloadHistory || []), { id: randomId(), before: cleanUrl(existing.downloadUrl), after: cleanUrl(game.downloadUrl), actorEmail: "", actorType: "admin", createdAt: new Date().toISOString() }];
+      if (cleanAssetUrl(existing.downloadUrl) !== cleanAssetUrl(game.downloadUrl)) {
+        game.downloadHistory = [...(existing.downloadHistory || []), { id: randomId(), before: cleanAssetUrl(existing.downloadUrl), after: cleanAssetUrl(game.downloadUrl), actorEmail: "", actorType: "admin", createdAt: new Date().toISOString() }];
       }
       if (game.featured) store.games.forEach((item) => { item.featured = false; });
       store.games[index] = game;
@@ -2254,7 +2339,7 @@ async function handleAdminClearLate(req, res, url, id) {
     });
     return { ...target };
   });
-  return json(res, 200, { ok: true, game, message: "补交标记已撤销。后续截止后修改下载地址仍会重新触发。" });
+  return json(res, 200, { ok: true, game, message: "补交标记已撤销。后续截止后替换作品文件仍会重新触发。" });
 }
 
 async function handleAdminAudit(req, res, url) {
@@ -2520,6 +2605,10 @@ async function serveFile(res, requestedPath, options = {}) {
       "cache-control": options.noStore ? "no-store" : "public, max-age=300",
       "x-content-type-options": "nosniff"
     };
+    if (options.downloadName) {
+      const fallback = `game-file${ext || ".zip"}`;
+      headers["content-disposition"] = `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(options.downloadName)}`;
+    }
     if (options.range && /^bytes=\d*-\d*$/.test(options.range)) {
       const [startText, endText] = options.range.replace("bytes=", "").split("-");
       const start = startText ? Number(startText) : 0;
@@ -2538,12 +2627,28 @@ async function serveFile(res, requestedPath, options = {}) {
   }
 }
 
+async function handleGameDownload(req, res, id) {
+  if (req.method !== "GET") return methodNotAllowed(res);
+  const store = await ensureStore();
+  const game = store.games.find((item) => item.id === id && isGamePublic(item));
+  if (!game?.downloadUrl) return notFound(res);
+  if (!String(game.downloadUrl).startsWith("/uploads/")) {
+    res.writeHead(302, { location: game.downloadUrl, "cache-control": "no-store" });
+    return res.end();
+  }
+  const requested = path.resolve(UPLOAD_DIR, path.basename(game.downloadUrl));
+  if (!requested.startsWith(UPLOAD_DIR)) return notFound(res);
+  const originalName = cleanText(game.assetMeta?.gameFile?.originalName, 240) || `game-file${path.extname(requested)}`;
+  return serveFile(res, requested, { range: req.headers.range, noStore: true, downloadName: originalName });
+}
+
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname.startsWith("/uploads/")) {
     const requested = path.resolve(UPLOAD_DIR, path.basename(pathname));
     if (!requested.startsWith(UPLOAD_DIR)) return notFound(res);
-    return serveFile(res, requested, { range: req.headers.range });
+    const downloadName = path.basename(pathname).startsWith("game-") ? `game-file${path.extname(requested)}` : "";
+    return serveFile(res, requested, { range: req.headers.range, downloadName });
   }
   const adminHost = isAdminHost(req);
   if (pathname === "/submit" || pathname === "/submit/") pathname = "/submit.html";
@@ -2567,6 +2672,8 @@ async function router(req, res) {
       if (req.method !== "GET") return methodNotAllowed(res);
       return json(res, 200, publicSite(await ensureStore()));
     }
+    const publicDownloadMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/download$/);
+    if (publicDownloadMatch) return await handleGameDownload(req, res, decodeURIComponent(publicDownloadMatch[1]));
     if (url.pathname === "/api/verification/request") {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleRequestCode(req, res);

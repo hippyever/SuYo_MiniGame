@@ -414,7 +414,7 @@ function editGame(id) {
   form.elements.creationNote.value = game.creationNote || "";
   form.elements.tags.value = (game.tags || []).join("，");
   form.elements.order.value = game.order ?? 100;
-  form.elements.downloadUrl.value = game.downloadUrl || "";
+  form.elements.gameFile.value = "";
   form.elements.coverUrl.value = /^https?:/.test(game.coverUrl || "") ? game.coverUrl : "";
   form.elements.videoExternalUrl.value = game.videoExternalUrl || "";
   form.elements.published.checked = Boolean(game.published);
@@ -439,7 +439,7 @@ async function saveGame(event) {
   $("#creatorsJson").value = JSON.stringify(adminState.creators.map(({ id, name, role, avatarUrl }) => ({ id, name, role, avatarUrl })));
   const data = new FormData(form);
   button.disabled = true;
-  button.textContent = form.elements.video.files.length ? "正在上传视频" : "正在保存";
+  button.textContent = form.elements.gameFile.files.length ? "正在上传作品文件" : form.elements.video.files.length ? "正在上传视频" : "正在保存";
   message($("#gameMessage"), "请保持页面开启，素材正在写入服务器。");
   try {
     const result = await adminFetch(id ? `/api/admin/games/${encodeURIComponent(id)}` : "/api/admin/games", {

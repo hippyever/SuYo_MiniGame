@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>参赛作品工作台 | 溯造 MiniGame</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/submit.css?v=20260714t" />
+    <link rel="stylesheet" href="/submit.css?v=20260715u" />
   </head>
   <body>
     <div class="submission-sky" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -43,7 +43,7 @@
       <section class="participant-workspace" id="participantWorkspace" hidden>
         <header class="workspace-heading">
           <div><p id="workspaceEyebrow">作品档案</p><h1 id="workspaceTitle">未命名作品</h1><span id="workspaceTeam"></span></div>
-          <div class="workspace-state"><strong id="statusLabel">草稿</strong><span id="deadlineLabel"></span><span id="roleLabel"></span></div>
+          <div class="workspace-state"><strong id="statusLabel">草稿</strong><span id="requirementSummary">正在检查提交资料</span><span id="deadlineLabel"></span><span id="roleLabel"></span></div>
         </header>
 
         <nav class="workspace-nav" aria-label="作品编辑导航">
@@ -71,7 +71,7 @@
               <label><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
               <label><span>上传演示视频</span><input name="video" type="file" accept="video/mp4,video/webm,video/quicktime" /><small id="videoCurrent">单个文件不超过 200MB</small></label>
               <label><span>公开视频链接</span><input name="videoExternalUrl" type="url" placeholder="哔哩哔哩、腾讯视频、YouTube 或视频直链" /></label>
-              <label class="wide critical-field"><span>游戏下载地址</span><input name="downloadUrl" type="url" placeholder="https://" /><small id="downloadNotice">截止后修改此字段会永久产生补交标记。</small></label>
+              <label class="wide critical-field game-file-field"><span>作品文件</span><input name="gameFile" type="file" accept=".zip,.7z,.rar,application/zip,application/x-7z-compressed,application/vnd.rar" /><small id="gameFileCurrent">支持 ZIP、7Z、RAR，单个文件不超过 2GB。</small><small class="upload-advisory">请不要集中在比赛结束前 1 小时上传。临近截止可能有多人同时上传并挤占网络带宽，上传速度会明显变慢。</small><progress id="gameFileProgress" max="100" value="0" hidden aria-label="作品文件上传进度"></progress><small id="gameFileProgressLabel" hidden>等待上传</small></label>
             </div>
           </section>
 
@@ -116,6 +116,6 @@
     </dialog>
 
     <div class="submission-toast" id="toast" hidden role="status"></div>
-    <script src="/submit.js?v=20260714t" defer></script>
+    <script src="/submit.js?v=20260715u" defer></script>
   </body>
 </html>
