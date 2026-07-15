@@ -29,6 +29,12 @@ async function login(name, team, email) {
   return verified.cookie;
 }
 
+async function createDraft(cookie, title) {
+  const form = new FormData();
+  form.set("title", title);
+  return request("/api/participant/games", { cookie, method: "POST", body: form });
+}
+
 function workForm(game, overrides = {}) {
   const values = {
     revision: game.revision,
@@ -63,6 +69,80 @@ assert.equal(result.response.status, 201);
 let game = result.body.game;
 assert.equal(game.status, "draft");
 assert.equal(game.ownerEmail, ownerEmail);
+
+// A participant may abandon only an unsubmitted draft. The game remains auditable,
+// but its owner and active members must no longer consume a participation slot.
+const abandonOwnerEmail = "abandon-owner-flow@example.com";
+const abandonMemberEmail = "abandon-member-flow@example.com";
+const abandonOwnerCookie = await login("Abandon owner", "Release team", abandonOwnerEmail);
+const abandonMemberCookie = await login("Abandon member", "Release team", abandonMemberEmail);
+result = await createDraft(abandonOwnerCookie, "Abandonable draft");
+assert.equal(result.response.status, 201);
+const abandonGame = result.body.game;
+result = await request(`/api/participant/games/${abandonGame.id}/members`, {
+  cookie: abandonOwnerCookie,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "Abandon member", email: abandonMemberEmail, role: "Art" })
+});
+assert.equal(result.response.status, 201);
+result = await request(`/api/participant/games/${abandonGame.id}/abandon`, { cookie: ownerCookie, method: "POST" });
+assert.equal(result.response.status, 403);
+result = await request(`/api/participant/games/${abandonGame.id}/abandon`, { cookie: abandonOwnerCookie, method: "POST" });
+assert.equal(result.response.status, 200);
+result = await request("/api/participant/workspace", { cookie: abandonOwnerCookie });
+assert.equal(result.body.game, null);
+assert.equal(result.body.canCreate, true);
+result = await request("/api/participant/workspace", { cookie: abandonMemberCookie });
+assert.equal(result.body.game, null);
+assert.equal(result.body.canCreate, true);
+result = await createDraft(abandonOwnerCookie, "Owner released draft");
+assert.equal(result.response.status, 201);
+result = await createDraft(abandonMemberCookie, "Member released draft");
+assert.equal(result.response.status, 201);
+result = await request(`/api/admin/audit?gameId=${encodeURIComponent(abandonGame.id)}&limit=100`, { admin: true });
+assert.ok(result.body.audit.some((item) => item.action === "game_draft_abandoned"));
+
+// An administrator can discard a never-submitted draft and release its whole team,
+// while retaining a reasoned audit trail. A released member can immediately be invited
+// to a different team.
+const discardOwnerEmail = "discard-owner-flow@example.com";
+const discardMemberEmail = "discard-member-flow@example.com";
+const discardOwnerCookie = await login("Discard owner", "Admin release team", discardOwnerEmail);
+const discardMemberCookie = await login("Discard member", "Admin release team", discardMemberEmail);
+result = await createDraft(discardOwnerCookie, "Admin-discardable draft");
+assert.equal(result.response.status, 201);
+const discardGame = result.body.game;
+result = await request(`/api/participant/games/${discardGame.id}/members`, {
+  cookie: discardOwnerCookie,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "Discard member", email: discardMemberEmail, role: "Audio" })
+});
+assert.equal(result.response.status, 201);
+result = await request(`/api/admin/games/${discardGame.id}/discard-draft`, {
+  admin: true,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ reason: "Integration test releases an unused draft" })
+});
+assert.equal(result.response.status, 200);
+result = await request("/api/participant/workspace", { cookie: discardOwnerCookie });
+assert.equal(result.body.game, null);
+assert.equal(result.body.canCreate, true);
+result = await request("/api/participant/workspace", { cookie: discardMemberCookie });
+assert.equal(result.body.game, null);
+assert.equal(result.body.canCreate, true);
+result = await request(`/api/participant/games/${game.id}/members`, {
+  cookie: ownerCookie,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "Discard member", email: discardMemberEmail, role: "Audio" })
+});
+assert.equal(result.response.status, 201);
+game = result.body.game;
+result = await request(`/api/admin/audit?gameId=${encodeURIComponent(discardGame.id)}&limit=100`, { admin: true });
+assert.ok(result.body.audit.some((item) => item.action === "game_draft_discarded" && item.reason === "Integration test releases an unused draft"));
 
 const oversizedCoverForm = workForm(game);
 oversizedCoverForm.set("cover", new Blob([Buffer.alloc(1024 * 1024 + 1)], { type: "image/png" }), "too-large.png");
@@ -111,6 +191,18 @@ assert.equal(result.response.status, 200);
 game = result.body.game;
 assert.equal(game.status, "submitted");
 assert.equal(game.lateSubmission, false);
+
+// Neither release path may ever dispose of a work that has been submitted,
+// including one that might later be withdrawn and resubmitted.
+result = await request(`/api/participant/games/${game.id}/abandon`, { cookie: ownerCookie, method: "POST" });
+assert.equal(result.response.status, 409);
+result = await request(`/api/admin/games/${game.id}/discard-draft`, {
+  admin: true,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ reason: "Must not discard submitted work" })
+});
+assert.equal(result.response.status, 409);
 
 const memberCookie = await login("林潮", "远日点小组", teammateEmail);
 result = await request("/api/participant/workspace", { cookie: memberCookie });

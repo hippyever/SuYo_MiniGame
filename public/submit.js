@@ -172,13 +172,14 @@ function renderSubmission() {
   const owner = game.role === "owner";
   $("#submitGame").hidden = !owner || game.status === "submitted";
   $("#withdrawGame").hidden = !owner || game.status !== "submitted";
+  $("#abandonDraftGame").hidden = !owner || game.status !== "draft" || Boolean(game.firstSubmittedAt || game.submittedAt);
   $("#submissionDescription").textContent = !owner
     ? "你可以编辑作品内容，以及自己的姓名、职能、头像与工作简述；提交与撤回由负责人完成。"
     : game.status === "submitted"
       ? "作品已经公开。撤回会让所有相关可能性核心自动归还，旧选票不会在重新提交后恢复。"
       : game.status === "withdrawn"
         ? "作品处于撤回状态。重新提交后会作为新的公开版本，旧选票不会恢复。"
-        : "提交后作品立即进入公开星图。截止时间之后提交会显示补交标记。";
+      : "提交后作品立即进入公开星图。截止时间之后提交会显示补交标记。未提交的草稿可选择放弃，并立即解除全队邮箱归属。";
 }
 
 function renderWorkspace() {
@@ -473,6 +474,23 @@ async function withdrawGame() {
   } catch (error) { setMessage($("#submissionMessage"), error.message, true); }
 }
 
+async function abandonDraftGame() {
+  const accepted = await confirmAction({
+    eyebrow: "放弃草稿",
+    title: "确认作废这份未提交草稿？",
+    description: "此操作不能恢复。草稿与审计记录会由管理员保留，但你和所有活跃队员会立即解除作品归属，可以创建或加入其他作品。未保存的本地修改不会写入草稿。",
+    accept: "作废并释放归属"
+  });
+  if (!accepted) return;
+  try {
+    const result = await api(`/api/participant/games/${encodeURIComponent(state.game.id)}/abandon`, { method: "POST" });
+    state.game = null;
+    state.dirty = false;
+    await loadWorkspace();
+    toast(result.message);
+  } catch (error) { setMessage($("#submissionMessage"), error.message, true); }
+}
+
 async function logout() {
   await api("/api/session", { method: "DELETE" });
   state.session = null; state.workspace = null; state.game = null;
@@ -492,6 +510,7 @@ function bindEvents() {
   $("#profileForm").addEventListener("submit", saveProfile);
   $("#submitGame").addEventListener("click", submitGame);
   $("#withdrawGame").addEventListener("click", withdrawGame);
+  $("#abandonDraftGame").addEventListener("click", abandonDraftGame);
   $("#logoutButton").addEventListener("click", logout);
   $("#cancelConfirm").addEventListener("click", () => closeConfirm(false));
   $("#acceptConfirm").addEventListener("click", () => closeConfirm(true));

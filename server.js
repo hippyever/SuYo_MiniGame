@@ -226,7 +226,7 @@ function normalizeAssetMeta(value) {
 }
 
 function gameStatus(game) {
-  if (["draft", "submitted", "withdrawn"].includes(game?.status)) return game.status;
+  if (["draft", "submitted", "withdrawn", "abandoned"].includes(game?.status)) return game.status;
   return game?.published ? "submitted" : "draft";
 }
 
@@ -268,6 +268,35 @@ function participantGame(store, email) {
     if (access) return { game, ...access };
   }
   return null;
+}
+
+function isDiscardableDraft(game) {
+  return gameStatus(game) === "draft" && !cleanText(game.firstSubmittedAt, 60) && !cleanText(game.submittedAt, 60);
+}
+
+function abandonDraftAndReleaseOwnership(game, { now = new Date().toISOString(), reason = "", actorType = "participant", actorId = "", actorEmail = "" } = {}) {
+  const releasedEmails = [...gameMemberEmails(game)];
+  const ownerEmail = normalizeEmail(game.ownerEmail);
+  const members = normalizeTeamMembers(game.teamMembers);
+  if (ownerEmail) game.historicalOwnerEmails = [...new Set([...(game.historicalOwnerEmails || []), ownerEmail])];
+  for (const member of members) {
+    if (member.email) game.historicalTeamEmails = [...new Set([...(game.historicalTeamEmails || []), member.email])];
+    if (member.active) {
+      member.active = false;
+      member.removedAt = now;
+    }
+  }
+  game.ownerEmail = "";
+  game.ownerCreatorId = "";
+  game.teamMembers = members;
+  game.status = "abandoned";
+  game.published = false;
+  game.abandonedAt = now;
+  game.abandonedReason = cleanText(reason, 500);
+  game.abandonedBy = { type: actorType, id: cleanText(actorId, 100), email: normalizeEmail(actorEmail) };
+  game.updatedAt = now;
+  game.revision = Number(game.revision || 1) + 1;
+  return releasedEmails;
 }
 
 function submissionDeadlineMs(settings) {
@@ -385,6 +414,13 @@ function migrateStore(store) {
       firstSubmittedAt: cleanText(game.firstSubmittedAt, 60) || submittedAt,
       submittedAt,
       withdrawnAt: cleanText(game.withdrawnAt, 60),
+      abandonedAt: cleanText(game.abandonedAt, 60),
+      abandonedReason: cleanText(game.abandonedReason, 500),
+      abandonedBy: game.abandonedBy && typeof game.abandonedBy === "object" ? {
+        type: cleanText(game.abandonedBy.type, 30),
+        id: cleanText(game.abandonedBy.id, 100),
+        email: normalizeEmail(game.abandonedBy.email)
+      } : null,
       lateSubmission: Boolean(game.lateSubmission),
       lateMarkedAt: cleanText(game.lateMarkedAt, 60),
       lateReasons: Array.isArray(game.lateReasons) ? game.lateReasons : [],
@@ -1608,6 +1644,9 @@ function gameFromFields(fields, files, existing = null, options = {}) {
     firstSubmittedAt: cleanText(existing?.firstSubmittedAt, 60),
     submittedAt: cleanText(existing?.submittedAt, 60),
     withdrawnAt: cleanText(existing?.withdrawnAt, 60),
+    abandonedAt: cleanText(existing?.abandonedAt, 60),
+    abandonedReason: cleanText(existing?.abandonedReason, 500),
+    abandonedBy: existing?.abandonedBy && typeof existing.abandonedBy === "object" ? { ...existing.abandonedBy } : null,
     lateSubmission: Boolean(existing?.lateSubmission),
     lateMarkedAt: cleanText(existing?.lateMarkedAt, 60),
     lateReasons: Array.isArray(existing?.lateReasons) ? existing.lateReasons : [],
@@ -1639,6 +1678,10 @@ function gameAuditSnapshot(game) {
     published: Boolean(game.published),
     ownerEmail: normalizeEmail(game.ownerEmail),
     teamMembers: normalizeTeamMembers(game.teamMembers),
+    firstSubmittedAt: cleanText(game.firstSubmittedAt, 60),
+    submittedAt: cleanText(game.submittedAt, 60),
+    abandonedAt: cleanText(game.abandonedAt, 60),
+    abandonedReason: cleanText(game.abandonedReason, 500),
     lateSubmission: Boolean(game.lateSubmission),
     revision: Number(game.revision || 1)
   };
@@ -2009,6 +2052,48 @@ async function handleParticipantWithdrawGame(req, res, id) {
   return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), ballot: ballotPayload(null), message: "作品已撤回，相关可能性核心已经归还给投票者。" });
 }
 
+async function handleParticipantAbandonDraft(req, res, id) {
+  const result = await mutateStore((store) => {
+    const record = requireParticipantSession(store, req);
+    const game = store.games.find((item) => item.id === id);
+    if (!game) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    const access = participantRole(game, record.session.email);
+    if (!access || access.role !== "owner") {
+      const error = new Error("只有作品负责人可以放弃草稿。");
+      error.status = 403;
+      error.code = "OWNER_REQUIRED";
+      throw error;
+    }
+    if (!isDiscardableDraft(game)) {
+      const error = new Error("只能放弃从未提交的草稿。曾提交过的作品请使用撤回流程。");
+      error.status = 409;
+      error.code = "DRAFT_NOT_DISCARDABLE";
+      throw error;
+    }
+    const before = gameAuditSnapshot(game);
+    const releasedEmails = abandonDraftAndReleaseOwnership(game, {
+      actorType: "participant",
+      actorId: record.session.id,
+      actorEmail: record.session.email
+    });
+    addAudit(store, {
+      action: "game_draft_abandoned",
+      actorType: "participant",
+      actorId: record.session.id,
+      actorEmail: record.session.email,
+      gameId: id,
+      before,
+      after: { ...gameAuditSnapshot(game), releasedEmails }
+    });
+    return { releasedEmails };
+  });
+  return json(res, 200, { ok: true, releasedEmails: result.releasedEmails, message: "草稿已作废；你和所有队员的邮箱归属已解除，可以创建或加入其他作品。" });
+}
+
 async function handleParticipantAddMember(req, res, id) {
   const body = await readJson(req);
   const email = normalizeEmail(body.email);
@@ -2343,6 +2428,12 @@ async function handleAdminUpdateGame(req, res, url, id) {
         throw error;
       }
       const existing = store.games[index];
+      if (gameStatus(existing) === "abandoned") {
+        const error = new Error("该草稿已作废并释放归属，不能再编辑或重新启用。");
+        error.status = 409;
+        error.code = "DRAFT_ABANDONED";
+        throw error;
+      }
       const before = gameAuditSnapshot(existing);
       const game = gameFromFields(parsed.fields, parsed.files, existing);
       game.status = game.published ? "submitted" : gameStatus(existing) === "withdrawn" ? "withdrawn" : "draft";
@@ -2364,6 +2455,40 @@ async function handleAdminUpdateGame(req, res, url, id) {
     await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
     throw error;
   }
+}
+
+async function handleAdminDiscardDraft(req, res, url, id) {
+  if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
+  const body = await readJson(req);
+  const reason = cleanText(body.reason, 500);
+  if (!reason) return json(res, 400, { ok: false, error: "REASON_REQUIRED", message: "请填写作废草稿的原因，以保留可追溯审计记录。" });
+  const result = await mutateStore((store) => {
+    const game = store.games.find((item) => item.id === id);
+    if (!game) {
+      const error = new Error("没有找到这款作品。");
+      error.status = 404;
+      throw error;
+    }
+    if (!isDiscardableDraft(game)) {
+      const error = new Error("仅能作废从未提交的草稿；已提交或曾提交后撤回的作品必须保留归属。");
+      error.status = 409;
+      error.code = "DRAFT_NOT_DISCARDABLE";
+      throw error;
+    }
+    const before = gameAuditSnapshot(game);
+    const releasedEmails = abandonDraftAndReleaseOwnership(game, { reason, actorType: "admin", actorId: "admin" });
+    addAudit(store, {
+      action: "game_draft_discarded",
+      actorType: "admin",
+      actorId: "admin",
+      gameId: id,
+      reason,
+      before,
+      after: { ...gameAuditSnapshot(game), releasedEmails }
+    });
+    return { game: { ...game }, releasedEmails };
+  });
+  return json(res, 200, { ok: true, game: result.game, releasedEmails: result.releasedEmails, message: "草稿已作废，负责人和队员邮箱归属已解除；完整记录已写入审计日志。" });
 }
 
 async function handleAdminDeleteGame(req, res, url, id) {
@@ -2435,6 +2560,12 @@ async function handleAdminBindOwner(req, res, url, id) {
     if (!target) {
       const error = new Error("没有找到这款作品。");
       error.status = 404;
+      throw error;
+    }
+    if (gameStatus(target) === "abandoned") {
+      const error = new Error("该草稿已作废并释放归属，不能重新绑定负责人。");
+      error.status = 409;
+      error.code = "DRAFT_ABANDONED";
       throw error;
     }
     const occupied = participantGame(store, email);
@@ -2872,6 +3003,11 @@ async function router(req, res) {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleParticipantWithdrawGame(req, res, decodeURIComponent(participantWithdrawMatch[1]));
     }
+    const participantAbandonMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/abandon$/);
+    if (participantAbandonMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantAbandonDraft(req, res, decodeURIComponent(participantAbandonMatch[1]));
+    }
     const participantMembersMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/members$/);
     if (participantMembersMatch) {
       if (req.method !== "POST") return methodNotAllowed(res);
@@ -2901,6 +3037,11 @@ async function router(req, res) {
     if (url.pathname === "/api/admin/games") {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleAdminCreateGame(req, res, url);
+    }
+    const discardDraftMatch = url.pathname.match(/^\/api\/admin\/games\/([^/]+)\/discard-draft$/);
+    if (discardDraftMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleAdminDiscardDraft(req, res, url, decodeURIComponent(discardDraftMatch[1]));
     }
     const gameMatch = url.pathname.match(/^\/api\/admin\/games\/([^/]+)$/);
     if (gameMatch) {

@@ -128,27 +128,32 @@ function renderGames() {
     return;
   }
   list.innerHTML = games.map((game) => `
-    <article class="admin-game-item ${game.published ? "" : "draft"} ${game.lateSubmission ? "late" : ""}">
+    <article class="admin-game-item ${game.published ? "" : "draft"} ${game.lateSubmission ? "late" : ""} ${game.status === "abandoned" ? "abandoned" : ""}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
       <div>
         <strong>${escapeHTML(game.title || "未命名草稿")}</strong>
         <span>${escapeHTML(game.team)}</span>
         <small>${gameStatusLabel(game)}${game.lateSubmission ? " / 补交" : ""}${game.featured ? " / 本期主推" : ""} / ${game.voteCount} 票</small>
-        <label class="owner-binding"><span>唯一负责人邮箱</span><input type="email" data-owner-email="${escapeHTML(game.id)}" value="${escapeHTML(game.ownerEmail || "")}" placeholder="name@example.com" /></label>
+        ${game.status === "abandoned"
+          ? `<label class="owner-binding"><span>作品归属</span><em>已释放（审计保留）</em></label>`
+          : `<label class="owner-binding"><span>唯一负责人邮箱</span><input type="email" data-owner-email="${escapeHTML(game.id)}" value="${escapeHTML(game.ownerEmail || "")}" placeholder="name@example.com" /></label>`}
       </div>
       <div class="admin-row-actions">
-        <button class="text-action" data-edit-game="${escapeHTML(game.id)}" type="button">编辑</button>
-        <button class="text-action" data-bind-owner="${escapeHTML(game.id)}" type="button">绑定负责人</button>
+        ${game.status !== "abandoned" ? `<button class="text-action" data-edit-game="${escapeHTML(game.id)}" type="button">编辑</button>
+        <button class="text-action" data-bind-owner="${escapeHTML(game.id)}" type="button">绑定负责人</button>` : ""}
         ${game.lateSubmission ? `<button class="text-action danger-action" data-clear-late="${escapeHTML(game.id)}" type="button">复核补交标记</button>` : ""}
+        ${game.status === "draft" && !game.firstSubmittedAt && !game.submittedAt ? `<button class="text-action danger-action" data-discard-draft="${escapeHTML(game.id)}" type="button">作废并释放归属</button>` : ""}
       </div>
     </article>
   `).join("");
   $$('[data-edit-game]', list).forEach((button) => button.addEventListener("click", () => editGame(button.dataset.editGame)));
   $$('[data-bind-owner]', list).forEach((button) => button.addEventListener("click", () => bindOwner(button.dataset.bindOwner)));
   $$('[data-clear-late]', list).forEach((button) => button.addEventListener("click", () => clearLateMarker(button.dataset.clearLate)));
+  $$('[data-discard-draft]', list).forEach((button) => button.addEventListener("click", () => discardDraft(button.dataset.discardDraft)));
 }
 
 function gameStatusLabel(game) {
+  if (game.status === "abandoned") return "已作废 / 归属已释放";
   if (game.status === "withdrawn") return "已撤回";
   if (game.status === "submitted" || game.published) return "公开展示";
   return "草稿";
@@ -484,6 +489,24 @@ async function clearLateMarker(id) {
   try {
     const result = await adminFetch(`/api/admin/games/${encodeURIComponent(id)}/late`, {
       method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() })
+    });
+    showToast(result.message);
+    await loadDashboard();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function discardDraft(id) {
+  const game = gameById(id);
+  if (!game) return;
+  const reason = window.prompt(`作废《${game.title || "未命名草稿"}》会立即释放负责人和所有活跃队员的邮箱归属，且不能恢复。请填写作废原因：`);
+  if (!reason?.trim()) return;
+  try {
+    const result = await adminFetch(`/api/admin/games/${encodeURIComponent(id)}/discard-draft`, {
+      method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reason: reason.trim() })
     });
