@@ -175,6 +175,25 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
 .form-message[data-error="true"] { color: var(--danger); }
 .form-message[data-identity-signal="true"] { border-left: 2px solid var(--signal); padding: 9px 12px; color: var(--ink); background: color-mix(in srgb, var(--signal) 8%, transparent); line-height: 1.65; }
 #authForm[data-invited="true"] input[readonly] { border-color: color-mix(in srgb, var(--signal) 55%, var(--line)); color: var(--signal); background: color-mix(in srgb, var(--signal) 5%, transparent); }
+.markdown-field { align-content: start; }
+.markdown-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+.markdown-tools button { border: 1px solid var(--line-strong); padding: 7px 10px; color: var(--signal); background: transparent; font: 700 .68rem/1 var(--font-mono); }
+.markdown-tools small { flex: 1 1 230px; color: var(--muted); font-size: .7rem; line-height: 1.55; }
+.markdown-preview { border-left: 2px solid var(--signal); padding: 14px 16px; background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
+.markdown-content { color: var(--ink); line-height: 1.75; overflow-wrap: anywhere; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0 0 1em; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { margin: 1.25em 0 .5em; color: var(--ink); font-family: var(--font-display); line-height: 1.1; }
+.markdown-content h1 { font-size: 1.35em; }.markdown-content h2 { font-size: 1.2em; }.markdown-content h3 { font-size: 1.08em; }
+.markdown-content ul, .markdown-content ol { margin: 0 0 1em; padding-left: 1.35em; }
+.markdown-content blockquote { margin: 0 0 1em; border-left: 2px solid var(--signal); padding-left: 1em; color: var(--muted); }
+.markdown-content pre { margin: 0 0 1em; overflow: auto; padding: 12px; background: var(--space); color: var(--signal); font: .76rem/1.6 var(--font-mono); }
+.markdown-content code { padding: .12em .32em; background: color-mix(in srgb, var(--signal) 14%, transparent); font-family: var(--font-mono); font-size: .88em; }
+.markdown-content pre code { padding: 0; background: transparent; }
+.markdown-content a { color: var(--signal); text-decoration-thickness: 1px; }
+.markdown-compact { font-size: .78rem; line-height: 1.55; }
+.markdown-compact p, .markdown-compact ul, .markdown-compact ol, .markdown-compact blockquote, .markdown-compact pre { margin-bottom: .65em; }
 
 .submission-loading { min-height: 60dvh; place-content: center; justify-items: center; gap: 16px; }
 .submission-loading:not([hidden]) { display: grid; }
@@ -220,6 +239,30 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
 .save-dock strong { font-size: .78rem; }
 .save-dock span { color: var(--muted); font-size: .68rem; }
 .save-dock .form-message { grid-column: 1 / -1; }
+
+.development-documents { position: relative; }
+.development-documents::before { content: "PRIVATE / TEAM ONLY"; position: absolute; top: 32px; right: 0; color: color-mix(in srgb, var(--signal) 48%, transparent); font: 700 .62rem/1 var(--font-mono); letter-spacing: .14em; }
+.document-upload-console { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 16px 22px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); padding: 24px 0; }
+.document-file-picker { display: grid; gap: 9px; }
+.document-file-picker > span { font-weight: 750; }
+.document-file-picker small { color: var(--muted); font-size: .7rem; line-height: 1.55; }
+.document-upload-console progress { grid-column: 1 / -1; width: 100%; height: 6px; border: 0; border-radius: 0; overflow: hidden; color: var(--signal); background: var(--surface-2); }
+.document-upload-console progress::-webkit-progress-bar { background: var(--surface-2); }
+.document-upload-console progress::-webkit-progress-value { background: var(--signal); }
+.document-upload-console progress::-moz-progress-bar { background: var(--signal); }
+.document-upload-console .form-message { grid-column: 1 / -1; }
+.development-document-list { display: grid; }
+.development-document-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 18px; border-bottom: 1px solid var(--line); padding: 18px 0; }
+.document-index { color: var(--signal); font: 700 .66rem/1 var(--font-mono); }
+.development-document-row > div:nth-child(2) { min-width: 0; display: grid; gap: 5px; }
+.development-document-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.development-document-row span, .development-document-row code { color: var(--muted); font: 600 .65rem/1.45 var(--font-mono); }
+.document-actions { display: flex; align-items: center; gap: 6px; }
+.document-actions a, .document-actions button { border: 0; padding: 9px 10px; color: var(--muted); background: transparent; font: 700 .68rem/1 var(--font-mono); text-decoration: none; }
+.document-actions a:hover, .document-actions button:hover { color: var(--signal); }
+.document-actions .danger-text:hover { color: var(--danger); }
+.document-empty { display: grid; gap: 5px; border-bottom: 1px solid var(--line); padding: 30px 0; }
+.document-empty span { color: var(--muted); font-size: .74rem; }
 
 .team-roster { display: grid; gap: 1px; background: var(--line); }
 .team-row { display: grid; grid-template-columns: 64px minmax(150px, .8fr) minmax(160px, 1fr) auto; align-items: center; gap: 18px; min-height: 92px; padding: 14px 18px; background: var(--space); }
@@ -301,6 +344,12 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
   .field-grid .wide { grid-column: auto; }
   .save-dock { bottom: 8px; grid-template-columns: 1fr; width: 100%; margin: -12px 0 12px; }
   .save-dock .signal-button { width: 100%; }
+  .development-documents::before { position: static; display: block; margin-bottom: 18px; }
+  .document-upload-console { grid-template-columns: 1fr; }
+  .document-upload-console .signal-button { width: 100%; }
+  .document-upload-console progress, .document-upload-console .form-message { grid-column: auto; }
+  .development-document-row { grid-template-columns: 34px minmax(0, 1fr); gap: 12px; }
+  .document-actions { grid-column: 2; flex-wrap: wrap; }
   .team-row { grid-template-columns: 52px 1fr auto; gap: 12px; }
   .team-row code { grid-column: 2 / -1; }
   .team-row-actions { grid-column: 3; grid-row: 1 / 3; flex-direction: column; }

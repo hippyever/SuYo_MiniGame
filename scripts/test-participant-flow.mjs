@@ -162,6 +162,18 @@ assert.match(game.downloadUrl, /^\/uploads\/game-/);
 assert.equal(game.gameFileMeta.originalName, "game-v1.zip");
 assert.equal(game.videoExternalUrl, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
+const markdownDescription = "## Core loop\n\n- Tune gravity\n- Route the signal\n\nUse **momentum** and `timing`.";
+const markdownCreationNote = "> A small experiment\n\nBuilt during a late-night jam.";
+result = await request(`/api/participant/games/${game.id}`, {
+  cookie: ownerCookie,
+  method: "PUT",
+  body: workForm(game, { description: markdownDescription, creationNote: markdownCreationNote })
+});
+assert.equal(result.response.status, 200);
+game = result.body.game;
+assert.equal(game.description, markdownDescription);
+assert.equal(game.creationNote, markdownCreationNote);
+
 result = await request(`/api/participant/games/${game.id}/members`, {
   cookie: ownerCookie,
   method: "POST",
@@ -208,7 +220,7 @@ const memberCookie = await login("林潮", "远日点小组", teammateEmail);
 result = await request("/api/participant/workspace", { cookie: memberCookie });
 assert.equal(result.body.game.role, "member");
 
-const contribution = "负责核心玩法程序、关卡交互，以及 Demo 的性能优化。";
+const contribution = "负责核心玩法程序、关卡交互，以及 **Demo** 的性能优化。\n\n- 性能分析\n- Bug 修复";
 const memberProfile = new FormData();
 memberProfile.set("name", "林潮");
 memberProfile.set("role", "程序");
@@ -228,6 +240,8 @@ assert.equal(result.response.status, 403);
 result = await request("/api/site");
 const publicGame = result.body.games.find((item) => item.id === game.id);
 assert.equal(publicGame.creators.find((creator) => creator.id === member.creatorId)?.contribution, contribution);
+assert.equal(publicGame.description, markdownDescription);
+assert.equal(publicGame.creationNote, markdownCreationNote);
 assert.equal(publicGame.downloadUrl, `/api/games/${encodeURIComponent(game.id)}/download`);
 result = await request(publicGame.downloadUrl);
 assert.equal(result.response.status, 200);

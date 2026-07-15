@@ -1526,6 +1526,38 @@ select:focus {
   white-space: nowrap;
 }
 
+.admin-private-documents {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 9px;
+}
+
+.admin-private-documents > span {
+  flex-basis: 100%;
+  color: var(--accent-readable);
+  font: 700 .62rem/1.3 var(--font-mono);
+}
+
+.admin-private-documents button {
+  max-width: 220px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 6px 8px;
+  color: var(--muted);
+  background: transparent;
+  font: 650 .62rem/1 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-private-documents button:hover { border-color: var(--accent); color: var(--ink); }
+.admin-private-documents em { color: var(--muted); font-size: .66rem; font-style: normal; }
+
 .admin-game-item span,
 .admin-game-item small {
   color: var(--muted);

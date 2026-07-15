@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>参赛作品工作台 | 溯造 MiniGame</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/submit.css?v=20260715w" />
+    <link rel="stylesheet" href="/submit.css?v=20260715z" />
   </head>
   <body>
     <div class="submission-sky" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -47,7 +47,7 @@
         </header>
 
         <nav class="workspace-nav" aria-label="作品编辑导航">
-          <a href="#contentSection">作品内容</a><a href="#mediaSection">媒体信号</a><a href="#teamSection">制作人员</a><a href="#submissionSection">提交状态</a>
+          <a href="#contentSection">作品内容</a><a href="#mediaSection">媒体信号</a><a href="#documentsSection">开发文档</a><a href="#teamSection">制作人员</a><a href="#submissionSection">提交状态</a>
         </nav>
 
         <form class="work-form" id="gameForm">
@@ -58,8 +58,8 @@
               <label><span>游戏名称</span><input name="title" maxlength="60" required /></label>
               <label><span>队伍名称</span><input name="team" maxlength="60" /></label>
               <label class="wide"><span>一句话介绍</span><input name="shortDescription" maxlength="120" /></label>
-              <label class="wide"><span>游戏简介</span><textarea name="description" rows="7" maxlength="1200"></textarea></label>
-              <label class="wide"><span>创作手记</span><textarea name="creationNote" rows="6" maxlength="600"></textarea><small>选填。可以记录灵感、取舍和 Game Jam 过程。</small></label>
+              <label class="wide markdown-field"><span>游戏简介</span><textarea name="description" rows="7" maxlength="1200"></textarea><div class="markdown-tools"><button type="button" data-markdown-preview-toggle>预览格式</button><small>支持 Markdown：标题、列表、加粗、引用、链接与代码块。</small></div><div class="markdown-preview markdown-content" data-markdown-preview hidden></div></label>
+              <label class="wide markdown-field"><span>创作手记</span><textarea name="creationNote" rows="6" maxlength="600"></textarea><div class="markdown-tools"><button type="button" data-markdown-preview-toggle>预览格式</button><small>选填，支持 Markdown；换行和空行会原样保留。</small></div><div class="markdown-preview markdown-content" data-markdown-preview hidden></div></label>
               <label class="wide"><span>标签</span><input name="tags" maxlength="120" placeholder="解谜，叙事，动作" /></label>
             </div>
           </section>
@@ -77,6 +77,18 @@
 
           <div class="save-dock"><div><strong id="saveState">尚无未保存修改</strong><span id="updatedAtLabel"></span></div><button class="signal-button primary" id="saveGame" type="submit">保存作品详情</button><p class="form-message" id="gameMessage" role="status"></p></div>
         </form>
+
+        <section class="work-section development-documents" id="documentsSection">
+          <header><div><span>内部资料</span><h2>开发文档</h2></div><p>仅本队与管理员可见，不会出现在公开页面或公开接口；截止后仍可更新，不触发补交标记。</p></header>
+          <div class="document-upload-console">
+            <label class="document-file-picker"><span>选择内部文件</span><input id="developmentDocumentFiles" type="file" multiple accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.txt,.md,.zip,.7z,.rar" /><small>支持 DOC/DOCX、XLS/XLSX、PPT/PPTX、PDF、TXT/MD、ZIP/7Z/RAR；每份不超过 200MB。传输中断后，重新点击上传即可续传。</small></label>
+            <button class="signal-button secondary" id="uploadDevelopmentDocuments" type="button">写入内部资料舱</button>
+            <progress id="developmentDocumentProgress" max="100" value="0" hidden aria-label="开发文档上传进度"></progress>
+            <p class="form-message" id="developmentDocumentMessage" role="status"></p>
+          </div>
+          <div class="development-document-list" id="developmentDocumentList" aria-live="polite"></div>
+          <input id="replacementDocumentFile" type="file" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.txt,.md,.zip,.7z,.rar" hidden />
+        </section>
 
         <section class="work-section" id="teamSection">
           <header><div><span>制作人员</span><h2>轨道成员</h2></div><p>成员可以维护自己的姓名、职能、头像与工作简述；邮箱决定编辑权限与自投限制。</p></header>
@@ -105,7 +117,7 @@
         <input name="memberId" type="hidden" />
         <label><span>姓名</span><input name="name" maxlength="40" required /></label>
         <label><span>职能</span><input name="role" maxlength="40" /></label>
-        <label><span>工作简述</span><textarea name="contribution" rows="5" maxlength="300" placeholder="例如：负责核心玩法程序、关卡交互与性能优化。"></textarea><small>说明你在本次 Demo 中实际完成的模块、功能或内容，最多 300 字。</small></label>
+        <label class="markdown-field"><span>工作简述</span><textarea name="contribution" rows="5" maxlength="300" placeholder="例如：负责核心玩法程序、关卡交互与性能优化。"></textarea><div class="markdown-tools"><button type="button" data-markdown-preview-toggle>预览格式</button><small>支持 Markdown，最多 300 字。</small></div><div class="markdown-preview markdown-content" data-markdown-preview hidden></div></label>
         <label><span>头像</span><input name="profileAvatar" type="file" accept="image/*" /></label>
         <button class="signal-button primary" type="submit">保存成员资料</button><p class="form-message" id="profileMessage" role="status"></p>
       </form>
@@ -116,6 +128,7 @@
     </dialog>
 
     <div class="submission-toast" id="toast" hidden role="status"></div>
-    <script src="/submit.js?v=20260715x" defer></script>
+    <script src="/markdown.js?v=20260715a" defer></script>
+    <script src="/submit.js?v=20260715aa" defer></script>
   </body>
 </html>

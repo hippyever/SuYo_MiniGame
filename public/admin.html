@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>溯造 MiniGame | 轨道控制台</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/styles.css?v=20260714s" />
+    <link rel="stylesheet" href="/styles.css?v=20260715b" />
   </head>
   <body class="admin-body">
     <main class="admin-login" id="adminLogin">
@@ -66,7 +66,7 @@
         <section class="admin-block" id="gamesAdmin">
           <div class="admin-block-head">
             <div><h2>参展作品</h2><p>上传封面、演示视频、创作手记与制作成员。系统会为每款作品生成固定天体坐标。</p></div>
-            <button class="button button-outline" id="resetGameForm" type="button">新建作品</button>
+            <div class="admin-block-actions"><button class="button button-outline" id="exportAllGames" type="button">导出全部作品</button><button class="button button-outline" id="resetGameForm" type="button">新建作品</button></div>
           </div>
           <div class="game-admin-layout">
             <form class="game-editor" id="gameForm">
@@ -158,6 +158,6 @@
     </div>
 
     <div class="toast" id="adminToast" role="status" hidden></div>
-    <script src="/admin.js?v=20260715a" defer></script>
+    <script src="/admin.js?v=20260715b" defer></script>
   </body>
 </html>

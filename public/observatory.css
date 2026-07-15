@@ -1370,6 +1370,21 @@ canvas:focus-visible {
   line-height: 1.8;
 }
 
+.markdown-content { max-width: 56ch; color: var(--muted); font-size: 0.94rem; line-height: 1.8; overflow-wrap: anywhere; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0 0 1em; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { margin: 1.35em 0 .55em; color: var(--ink); font-family: var(--font-display); line-height: 1.1; }
+.markdown-content h1 { font-size: 1.5em; }.markdown-content h2 { font-size: 1.3em; }.markdown-content h3 { font-size: 1.12em; }
+.markdown-content ul, .markdown-content ol { margin: 0 0 1em; padding-left: 1.35em; }
+.markdown-content blockquote { margin: 0 0 1em; border-left: 2px solid var(--signal); padding-left: 1em; color: var(--muted); }
+.markdown-content pre { margin: 0 0 1em; overflow: auto; padding: 14px; background: color-mix(in srgb, var(--space) 82%, #000); color: var(--signal); font: .78rem/1.65 var(--font-mono); }
+.markdown-content code { padding: .12em .32em; background: color-mix(in srgb, var(--signal) 14%, transparent); font-family: var(--font-mono); font-size: .88em; }
+.markdown-content pre code { padding: 0; background: transparent; }
+.markdown-content a { color: var(--signal); text-decoration-thickness: 1px; }
+.creator-caption .markdown-content { max-width: none; font-size: .78rem; line-height: 1.65; }
+.creator-caption .markdown-content p, .creator-caption .markdown-content ul, .creator-caption .markdown-content ol, .creator-caption .markdown-content blockquote, .creator-caption .markdown-content pre { margin-bottom: .65em; }
+
 .detail-tags {
   display: flex;
   flex-wrap: wrap;

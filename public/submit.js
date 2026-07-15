@@ -5,7 +5,9 @@ const state = {
   dirty: false,
   pendingInvitedIdentity: false,
   confirmResolve: null,
-  profileTarget: null
+  profileTarget: null,
+  replacementDocumentId: "",
+  pendingReplacement: null
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -13,6 +15,27 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
+
+function renderMarkdown(value) {
+  return window.SuyoMarkdown?.render(value) || `<p>${escapeHTML(value)}</p>`;
+}
+
+function resetMarkdownPreviews(root = document) {
+  $$('[data-markdown-preview]', root).forEach((preview) => { preview.hidden = true; preview.innerHTML = ""; });
+  $$('[data-markdown-preview-toggle]', root).forEach((button) => { button.textContent = "预览格式"; button.setAttribute("aria-expanded", "false"); });
+}
+
+function toggleMarkdownPreview(button) {
+  const field = button.closest(".markdown-field");
+  const preview = $('[data-markdown-preview]', field);
+  const textarea = $("textarea", field);
+  if (!preview || !textarea) return;
+  const willShow = preview.hidden;
+  preview.hidden = !willShow;
+  button.textContent = willShow ? "收起预览" : "预览格式";
+  button.setAttribute("aria-expanded", String(willShow));
+  if (willShow) preview.innerHTML = renderMarkdown(textarea.value || "暂无内容");
 }
 
 function formatDate(value) {
@@ -74,6 +97,76 @@ function uploadApi(url, { method, body, onProgress }) {
   });
 }
 
+function resumableUploadKey(file, kind) {
+  return `suyo-resumable-upload:${kind}:${encodeURIComponent(`${file.name}:${file.size}:${file.lastModified}:${file.type}`)}`;
+}
+
+function clearResumableUpload(file, kind) {
+  if (file) localStorage.removeItem(resumableUploadKey(file, kind));
+}
+
+async function resumableUpload(file, { kind, onProgress, onState } = {}) {
+  if (!file) throw new Error("没有选择需要上传的文件。" );
+  const key = resumableUploadKey(file, kind);
+  let resumeId = localStorage.getItem(key) || "";
+  let initiated;
+  try {
+    initiated = await api("/api/participant/uploads", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, originalName: file.name, size: file.size, mimeType: file.type || "application/octet-stream", resumeId })
+    });
+  } catch (error) {
+    if (resumeId && error.status === 404) {
+      localStorage.removeItem(key);
+      resumeId = "";
+      initiated = await api("/api/participant/uploads", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, originalName: file.name, size: file.size, mimeType: file.type || "application/octet-stream" })
+      });
+    } else throw error;
+  }
+  let upload = initiated.upload;
+  localStorage.setItem(key, upload.id);
+  onProgress?.(upload.uploadedBytes, upload.size);
+  if (upload.uploadedBytes > 0) onState?.(`检测到已上传 ${Math.round(upload.uploadedBytes / upload.size * 100)}%，正在续传...`);
+  while (upload.uploadedBytes < upload.size) {
+    const offset = upload.uploadedBytes;
+    const blob = file.slice(offset, Math.min(file.size, offset + upload.chunkBytes));
+    let response;
+    try {
+      response = await fetch(`/api/participant/uploads/${encodeURIComponent(upload.id)}/chunk`, {
+        method: "PUT",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/octet-stream",
+          "x-upload-offset": String(offset)
+        },
+        body: blob
+      });
+    } catch {
+      const error = new Error(`网络中断，已保留 ${Math.round(offset / file.size * 100)}% 的进度。点击保存并保留当前文件，即可继续上传。`);
+      error.resumePercent = Math.round(offset / file.size * 100);
+      throw error;
+    }
+    const result = await response.json().catch(() => ({ ok: false, message: "服务器返回了无法识别的上传响应。" }));
+    if (!response.ok || result.ok === false) {
+      if (result.upload && Number.isFinite(result.upload.uploadedBytes) && result.upload.uploadedBytes !== offset) {
+        upload = result.upload;
+        onProgress?.(upload.uploadedBytes, upload.size);
+        continue;
+      }
+      const error = new Error(result.message || "上传分片失败。请点击保存重试。");
+      error.status = response.status;
+      throw error;
+    }
+    upload = result.upload;
+    onProgress?.(upload.uploadedBytes, upload.size);
+  }
+  const completed = await api(`/api/participant/uploads/${encodeURIComponent(upload.id)}/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  onProgress?.(completed.upload.uploadedBytes, completed.upload.size);
+  return completed.upload;
+}
+
 function showOnly(id) {
   for (const selector of ["authPanel", "workspaceLoading", "draftOrigin", "participantWorkspace"]) $(`#${selector}`).hidden = selector !== id;
 }
@@ -102,6 +195,7 @@ function fillGameForm() {
   }
   form.elements.coverUrl.value = String(game.coverUrl || "").startsWith("http") ? game.coverUrl : "";
   form.elements.gameFile.value = "";
+  form.elements.video.value = "";
   $("#coverCurrent").textContent = game.coverUrl ? `当前封面：${String(game.coverUrl).startsWith("/uploads/") ? "已上传文件" : "外部地址"}` : "尚未上传";
   $("#videoCurrent").textContent = game.uploadedVideoUrl ? "当前优先使用已上传视频" : game.videoExternalUrl ? "当前使用公开视频链接" : "单个文件不超过 200MB";
   $("#gameFileCurrent").textContent = game.gameFileMeta
@@ -110,6 +204,7 @@ function fillGameForm() {
       ? "当前作品仍使用旧版外部地址。选择压缩包并保存后将替换为上传文件。"
       : "支持 ZIP、7Z、RAR，单个文件不超过 2GB。";
   $("#updatedAtLabel").textContent = `最后保存：${formatDate(game.updatedAt)}`;
+  resetMarkdownPreviews(form);
   state.dirty = false;
   updateDirtyState();
 }
@@ -152,13 +247,145 @@ function renderTeam() {
   }
   roster.innerHTML = rows.map((row) => `<article class="team-row">
     <div class="team-avatar">${avatarMarkup(row.creator)}</div>
-    <div class="team-member-copy"><strong>${escapeHTML(row.creator.name || "未命名")}</strong><span>${escapeHTML(row.creator.role || (row.id === "owner" ? "负责人" : "职能未填写"))}</span><p class="team-member-contribution${row.creator.contribution ? "" : " is-empty"}">${escapeHTML(row.creator.contribution || "工作简述未填写")}</p></div>
+    <div class="team-member-copy"><strong>${escapeHTML(row.creator.name || "未命名")}</strong><span>${escapeHTML(row.creator.role || (row.id === "owner" ? "负责人" : "职能未填写"))}</span><div class="team-member-contribution markdown-content markdown-compact${row.creator.contribution ? "" : " is-empty"}">${renderMarkdown(row.creator.contribution || "工作简述未填写")}</div></div>
     <code>${escapeHTML(row.email || "负责人邮箱待后台绑定")}<br>${escapeHTML(row.meta)}</code>
     <div class="team-row-actions">${row.canEdit ? `<button type="button" data-edit-member="${escapeHTML(row.id)}">修改资料</button>` : ""}${row.canRemove ? `<button class="danger-text" type="button" data-remove-member="${escapeHTML(row.id)}">移除权限</button>` : ""}</div>
   </article>`).join("");
   $$('[data-edit-member]', roster).forEach((button) => button.addEventListener("click", () => openProfile(button.dataset.editMember)));
   $$('[data-remove-member]', roster).forEach((button) => button.addEventListener("click", () => removeMember(button.dataset.removeMember)));
   $("#memberInviteForm").hidden = game.role !== "owner";
+}
+
+function validateDevelopmentDocuments(files) {
+  const allowed = /\.(doc|docx|xls|xlsx|ppt|pptx|pdf|txt|md|zip|7z|rar)$/i;
+  const maxBytes = Number(state.workspace?.settings?.maxDevelopmentDocumentBytes || 200 * 1024 ** 2);
+  for (const file of files) {
+    if (!allowed.test(file.name)) return `“${file.name}”的格式不受支持。`;
+    if (file.size > maxBytes) return `“${file.name}”超过 ${formatBytes(maxBytes)}。`;
+  }
+  return "";
+}
+
+function renderDevelopmentDocuments() {
+  const list = $("#developmentDocumentList");
+  const documents = state.game?.developmentDocuments || [];
+  if (!documents.length) {
+    list.innerHTML = `<div class="document-empty"><strong>资料舱尚未写入文件</strong><span>策划案、排期、源文件说明与复盘材料都可以留在这里。</span></div>`;
+    return;
+  }
+  list.innerHTML = documents.map((document, index) => `<article class="development-document-row">
+    <span class="document-index">${String(index + 1).padStart(2, "0")}</span>
+    <div><strong>${escapeHTML(document.originalName)}</strong><span>${formatBytes(document.size)} · ${escapeHTML(formatDate(document.updatedAt || document.uploadedAt))}</span><code>SHA-256 ${escapeHTML(String(document.sha256 || "").slice(0, 16))}…</code></div>
+    <div class="document-actions"><a href="/api/participant/games/${encodeURIComponent(state.game.id)}/development-documents/${encodeURIComponent(document.id)}/download">下载</a><button type="button" data-replace-document="${escapeHTML(document.id)}">${state.pendingReplacement?.documentId === document.id ? "继续上传" : "替换"}</button><button class="danger-text" type="button" data-remove-document="${escapeHTML(document.id)}">移除</button></div>
+  </article>`).join("");
+  $$('[data-replace-document]', list).forEach((button) => button.addEventListener("click", () => {
+    if (state.pendingReplacement?.documentId === button.dataset.replaceDocument) {
+      replaceDevelopmentDocumentFile(state.pendingReplacement.file, state.pendingReplacement.documentId, { skipConfirmation: true });
+      return;
+    }
+    state.replacementDocumentId = button.dataset.replaceDocument;
+    const picker = $("#replacementDocumentFile");
+    picker.value = "";
+    picker.click();
+  }));
+  $$('[data-remove-document]', list).forEach((button) => button.addEventListener("click", () => removeDevelopmentDocument(button.dataset.removeDocument)));
+}
+
+async function uploadDevelopmentDocuments() {
+  const picker = $("#developmentDocumentFiles");
+  const files = [...picker.files];
+  if (!files.length) return setMessage($("#developmentDocumentMessage"), "请先选择需要上传的文件。", true);
+  const validation = validateDevelopmentDocuments(files);
+  if (validation) return setMessage($("#developmentDocumentMessage"), validation, true);
+  const button = $("#uploadDevelopmentDocuments");
+  const progress = $("#developmentDocumentProgress");
+  button.disabled = true;
+  progress.hidden = false;
+  progress.value = 0;
+  setMessage($("#developmentDocumentMessage"), `正在上传 ${files.length} 份内部文件。传输中断后可点击此按钮续传。`);
+  try {
+    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    let completedBytes = 0;
+    const uploadIds = [];
+    for (const file of files) {
+      const upload = await resumableUpload(file, {
+        kind: "developmentDocument",
+        onState: (text) => setMessage($("#developmentDocumentMessage"), text),
+        onProgress: (loaded) => { progress.value = Math.min(99, Math.round(((completedBytes + loaded) / totalBytes) * 100)); }
+      });
+      completedBytes += file.size;
+      uploadIds.push(upload.id);
+    }
+    const result = await api(`/api/participant/games/${encodeURIComponent(state.game.id)}/development-documents/attach`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadIds })
+    });
+    progress.value = 100;
+    files.forEach((file) => clearResumableUpload(file, "developmentDocument"));
+    picker.value = "";
+    state.game = result.game;
+    renderHeader(); renderDevelopmentDocuments();
+    setMessage($("#developmentDocumentMessage"), result.message);
+    toast(result.message);
+  } catch (error) {
+    setMessage($("#developmentDocumentMessage"), error.message, true);
+  } finally { button.disabled = false; }
+}
+
+async function replaceDevelopmentDocumentFile(file, documentId, { skipConfirmation = false } = {}) {
+  if (!file || !documentId) return;
+  const validation = validateDevelopmentDocuments([file]);
+  if (validation) return setMessage($("#developmentDocumentMessage"), validation, true);
+  const current = (state.game.developmentDocuments || []).find((document) => document.id === documentId);
+  if (!skipConfirmation) {
+    const accepted = await confirmAction({ eyebrow: "内部资料替换", title: `替换“${current?.originalName || "这份文档"}”？`, description: "新文件保存后，旧文件实体会立即清除；旧文件名、大小、哈希值和操作人仍保留在审计记录中。", accept: "确认替换" });
+    if (!accepted) return;
+  }
+  const progress = $("#developmentDocumentProgress");
+  progress.hidden = false; progress.value = 0;
+  setMessage($("#developmentDocumentMessage"), "正在替换内部文件（支持断点续传）...");
+  try {
+    const upload = await resumableUpload(file, {
+      kind: "developmentDocument",
+      onState: (text) => setMessage($("#developmentDocumentMessage"), text),
+      onProgress: (loaded, total) => { progress.value = Math.min(99, Math.round((loaded / total) * 100)); }
+    });
+    const result = await api(`/api/participant/games/${encodeURIComponent(state.game.id)}/development-documents/${encodeURIComponent(documentId)}/attach`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadId: upload.id })
+    });
+    progress.value = 100;
+    clearResumableUpload(file, "developmentDocument");
+    state.pendingReplacement = null;
+    state.replacementDocumentId = "";
+    state.game = result.game;
+    renderHeader(); renderDevelopmentDocuments();
+    setMessage($("#developmentDocumentMessage"), result.message);
+    toast(result.message);
+  } catch (error) {
+    state.pendingReplacement = { file, documentId };
+    renderDevelopmentDocuments();
+    setMessage($("#developmentDocumentMessage"), `${error.message} 可点击“继续上传”续传。`, true);
+  }
+}
+
+async function replaceDevelopmentDocument(event) {
+  const picker = event.currentTarget;
+  const file = picker.files[0];
+  const documentId = state.replacementDocumentId;
+  picker.value = "";
+  await replaceDevelopmentDocumentFile(file, documentId);
+}
+
+async function removeDevelopmentDocument(documentId) {
+  const document = (state.game.developmentDocuments || []).find((item) => item.id === documentId);
+  const accepted = await confirmAction({ eyebrow: "内部资料移除", title: `移除“${document?.originalName || "这份文档"}”？`, description: "文件实体会被清除，文件元数据和操作记录仍会永久保留在审计中。", accept: "确认移除" });
+  if (!accepted) return;
+  try {
+    const result = await api(`/api/participant/games/${encodeURIComponent(state.game.id)}/development-documents/${encodeURIComponent(documentId)}`, { method: "DELETE" });
+    state.game = result.game;
+    renderHeader(); renderDevelopmentDocuments();
+    setMessage($("#developmentDocumentMessage"), result.message);
+    toast(result.message);
+  } catch (error) { setMessage($("#developmentDocumentMessage"), error.message, true); }
 }
 
 function renderSubmission() {
@@ -187,6 +414,7 @@ function renderWorkspace() {
   renderHeader();
   fillGameForm();
   renderTeam();
+  renderDevelopmentDocuments();
   renderSubmission();
 }
 
@@ -344,29 +572,55 @@ async function saveGameDetails(event, { quiet = false } = {}) {
   button.disabled = true;
   const progress = $("#gameFileProgress");
   const progressLabel = $("#gameFileProgressLabel");
-  if (gameFile) {
+  if (gameFile || video) {
     progress.hidden = false;
     progressLabel.hidden = false;
     progress.value = 0;
-    progressLabel.textContent = "正在准备上传...";
+    progressLabel.textContent = "正在准备可恢复上传...";
   }
-  if (!quiet) setMessage($("#gameMessage"), gameFile ? "正在上传作品文件，请保持页面开启。" : "正在写入作品档案...");
+  if (!quiet) setMessage($("#gameMessage"), gameFile || video ? "正在准备可恢复上传。传输中断后可点击保存继续。" : "正在写入作品档案...");
   try {
+    if (video) {
+      progressLabel.textContent = "正在上传演示视频（支持断点续传）...";
+      const upload = await resumableUpload(video, {
+        kind: "video",
+        onState: (text) => { progressLabel.textContent = text; },
+        onProgress: (loaded, total) => {
+          const percent = Math.min(99, Math.round((loaded / total) * 100));
+          progress.value = percent;
+          progressLabel.textContent = `演示视频 ${percent}%（${formatBytes(loaded)} / ${formatBytes(total)}）`;
+        }
+      });
+      data.delete("video");
+      data.set("resumableVideoId", upload.id);
+    }
+    if (gameFile) {
+      progress.value = 0;
+      progressLabel.textContent = "正在上传作品文件（支持断点续传）...";
+      const upload = await resumableUpload(gameFile, {
+        kind: "game",
+        onState: (text) => { progressLabel.textContent = text; },
+        onProgress: (loaded, total) => {
+          const percent = Math.min(99, Math.round((loaded / total) * 100));
+          progress.value = percent;
+          progressLabel.textContent = `作品文件 ${percent}%（${formatBytes(loaded)} / ${formatBytes(total)}）`;
+        }
+      });
+      data.delete("gameFile");
+      data.set("resumableGameFileId", upload.id);
+    }
+    if (gameFile || video) progressLabel.textContent = "文件已完整传输，正在写入作品档案...";
     const result = await uploadApi(`/api/participant/games/${encodeURIComponent(state.game.id)}`, {
       method: "PUT",
-      body: data,
-      onProgress: (loaded, total) => {
-        if (!gameFile) return;
-        const percent = Math.min(99, Math.round((loaded / total) * 100));
-        progress.value = percent;
-        progressLabel.textContent = `已上传 ${percent}%（${formatBytes(loaded)} / ${formatBytes(total)}）`;
-      }
+      body: data
     });
-    if (gameFile) {
+    if (gameFile || video) {
       progress.value = 100;
       progressLabel.textContent = "上传完成，作品档案已保存。";
     }
     state.game = result.game;
+    clearResumableUpload(video, "video");
+    clearResumableUpload(gameFile, "game");
     renderHeader();
     fillGameForm();
     renderTeam();
@@ -376,7 +630,7 @@ async function saveGameDetails(event, { quiet = false } = {}) {
   } catch (error) {
     if (error.game) state.game = error.game;
     setMessage($("#gameMessage"), error.message, true);
-    if (gameFile) progressLabel.textContent = `上传失败：${error.message}`;
+    if (gameFile || video) progressLabel.textContent = `上传暂停：${error.message}`;
     return false;
   } finally {
     button.disabled = false;
@@ -412,6 +666,7 @@ function openProfile(memberId) {
   form.elements.role.value = creator?.role || "";
   form.elements.contribution.value = creator?.contribution || "";
   form.elements.profileAvatar.value = "";
+  resetMarkdownPreviews(form);
   setMessage($("#profileMessage"), "");
   $("#profileDialog").showModal();
 }
@@ -507,7 +762,10 @@ function bindEvents() {
   $("#gameForm").addEventListener("submit", saveGameDetails);
   $("#gameForm").addEventListener("input", () => { state.dirty = true; updateDirtyState(); });
   $("#memberInviteForm").addEventListener("submit", addMember);
+  $("#uploadDevelopmentDocuments").addEventListener("click", uploadDevelopmentDocuments);
+  $("#replacementDocumentFile").addEventListener("change", replaceDevelopmentDocument);
   $("#profileForm").addEventListener("submit", saveProfile);
+  $$('[data-markdown-preview-toggle]').forEach((button) => button.addEventListener("click", () => toggleMarkdownPreview(button)));
   $("#submitGame").addEventListener("click", submitGame);
   $("#withdrawGame").addEventListener("click", withdrawGame);
   $("#abandonDraftGame").addEventListener("click", abandonDraftGame);

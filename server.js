@@ -8,12 +8,16 @@ const { pipeline } = require("stream/promises");
 const { URL } = require("url");
 const Busboy = require("busboy");
 const nodemailer = require("nodemailer");
+const { ZipArchive } = require("archiver");
+const ExcelJS = require("exceljs");
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const STORE_FILE = path.resolve(process.env.MINIGAME_DATA_FILE || path.join(ROOT, "data", "minigame.json"));
 const DATA_DIR = path.dirname(STORE_FILE);
 const UPLOAD_DIR = path.resolve(process.env.MINIGAME_UPLOAD_DIR || path.join(DATA_DIR, "uploads"));
+const PRIVATE_DOCUMENT_DIR = path.resolve(process.env.MINIGAME_PRIVATE_DOCUMENT_DIR || path.join(DATA_DIR, "private-documents"));
+const UPLOAD_SESSION_DIR = path.resolve(process.env.MINIGAME_UPLOAD_SESSION_DIR || path.join(DATA_DIR, "upload-sessions"));
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const TZ = process.env.MINIGAME_TZ || "Asia/Shanghai";
@@ -32,6 +36,9 @@ const MAX_COVER_BYTES = Math.max(1, Number(process.env.MAX_COVER_MB || 12)) * 10
 const MAX_AVATAR_BYTES = Math.max(1, Number(process.env.MAX_AVATAR_MB || 4)) * 1024 * 1024;
 const MAX_VIDEO_BYTES = Math.max(10, Number(process.env.MAX_VIDEO_MB || 200)) * 1024 * 1024;
 const MAX_GAME_FILE_BYTES = Math.max(100, Number(process.env.MAX_GAME_FILE_MB || 2048)) * 1024 * 1024;
+const MAX_DEVELOPMENT_DOCUMENT_BYTES = Math.max(1, Number(process.env.MAX_DEVELOPMENT_DOCUMENT_MB || 200)) * 1024 * 1024;
+const RESUMABLE_CHUNK_BYTES = Math.min(64, Math.max(1, Number(process.env.RESUMABLE_UPLOAD_CHUNK_MB || 8))) * 1024 * 1024;
+const RESUMABLE_UPLOAD_TTL_MS = Math.max(1, Number(process.env.RESUMABLE_UPLOAD_TTL_HOURS || 48)) * 60 * 60 * 1000;
 const UPLOAD_PER_REQUEST_BYTES_PER_SEC = Math.max(0, Number(process.env.UPLOAD_PER_REQUEST_MBIT || 150)) * 125000;
 const UPLOAD_TOTAL_BYTES_PER_SEC = Math.max(0, Number(process.env.UPLOAD_TOTAL_MBIT || 180)) * 125000;
 const VIDEO_RETENTION_MS = Math.max(1, Number(process.env.VIDEO_RETENTION_DAYS || 7)) * 24 * 60 * 60 * 1000;
@@ -61,8 +68,14 @@ const staticTypes = {
 
 let writeQueue = Promise.resolve();
 let mailTransport = null;
+const exportTickets = new Map();
+
+const DEVELOPMENT_DOCUMENT_EXTENSIONS = new Set([
+  ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".txt", ".md", ".zip", ".7z", ".rar"
+]);
 
 const activeUploads = new Set();
+const activeResumableUploads = new Set();
 
 class FairUploadTransform extends Transform {
   constructor() {
@@ -146,7 +159,7 @@ function normalizeCreators(value) {
       id: cleanText(creator?.id, 80) || creatorId(name, role, index),
       name,
       role,
-      contribution: cleanText(creator?.contribution, 300),
+      contribution: cleanMultilineText(creator?.contribution, 300),
       avatarUrl: cleanText(creator?.avatarUrl, 1000),
       order: Number.isFinite(Number(creator?.order)) ? Number(creator.order) : index
     };
@@ -163,6 +176,20 @@ function normalizeTeamMembers(value) {
     removedAt: cleanText(member?.removedAt, 60),
     firstLoginAt: cleanText(member?.firstLoginAt, 60)
   })).filter((member) => isValidEmail(member.email));
+}
+
+function normalizeDevelopmentDocuments(value) {
+  return (Array.isArray(value) ? value : []).map((document) => ({
+    id: cleanText(document?.id, 80) || randomId(),
+    originalName: cleanText(document?.originalName, 240) || "未命名资料",
+    storageName: path.basename(cleanText(document?.storageName, 260)),
+    mimeType: cleanText(document?.mimeType, 120) || "application/octet-stream",
+    size: Math.max(0, Number(document?.size || 0)),
+    sha256: cleanText(document?.sha256, 64),
+    uploadedBy: normalizeEmail(document?.uploadedBy),
+    uploadedAt: cleanText(document?.uploadedAt, 60),
+    updatedAt: cleanText(document?.updatedAt, 60) || cleanText(document?.uploadedAt, 60)
+  })).filter((document) => document.storageName && DEVELOPMENT_DOCUMENT_EXTENSIONS.has(path.extname(document.originalName).toLowerCase()));
 }
 
 function normalizeEmailVerification(value) {
@@ -432,7 +459,8 @@ function migrateStore(store) {
       assetMeta: game.assetMeta && typeof game.assetMeta === "object" ? game.assetMeta : {},
       assetHistory: Array.isArray(game.assetHistory) ? game.assetHistory : [],
       downloadHistory: Array.isArray(game.downloadHistory) ? game.downloadHistory : [],
-      creationNote: cleanText(game.creationNote, 600) || (game.isDemo ? cleanText(defaultDemoById.get(game.id)?.creationNote, 600) : ""),
+      developmentDocuments: normalizeDevelopmentDocuments(game.developmentDocuments),
+      creationNote: cleanMultilineText(game.creationNote, 600) || (game.isDemo ? cleanMultilineText(defaultDemoById.get(game.id)?.creationNote, 600) : ""),
       creators: normalizeCreators(game.creators),
       planetSeed: cleanText(game.planetSeed, 80) || crypto.createHash("sha256").update(String(game.id || randomId())).digest("hex").slice(0, 16)
     };
@@ -469,6 +497,8 @@ function migrateStore(store) {
 async function ensureStore() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.mkdir(UPLOAD_DIR, { recursive: true });
+  await fsp.mkdir(PRIVATE_DOCUMENT_DIR, { recursive: true });
+  await fsp.mkdir(UPLOAD_SESSION_DIR, { recursive: true });
   try {
     const store = migrateStore(JSON.parse(await fsp.readFile(STORE_FILE, "utf8")));
     const expired = store.retiredAssets.filter((asset) => asset.deleteAfter && Date.parse(asset.deleteAfter) <= Date.now());
@@ -552,6 +582,14 @@ async function readJson(req, maxBytes = 1024 * 1024) {
 
 function cleanText(value, maxLength = 200) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, maxLength);
+}
+
+function cleanMultilineText(value, maxLength = 200) {
+  const normalized = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .slice(0, maxLength);
+  return normalized.trim() ? normalized : "";
 }
 
 function normalizeText(value) {
@@ -1433,6 +1471,13 @@ function extensionFor(mime, originalName) {
   return known[mime] || path.extname(originalName || "").toLowerCase().slice(0, 8);
 }
 
+function decodeMultipartFilename(value) {
+  const input = String(value || "");
+  if (!input || /[^\u0000-\u00ff]/.test(input)) return input;
+  const decoded = Buffer.from(input, "latin1").toString("utf8");
+  return decoded.includes("\uFFFD") ? input : decoded;
+}
+
 async function parseGameMultipart(req) {
   await fsp.mkdir(UPLOAD_DIR, { recursive: true });
   return new Promise((resolve, reject) => {
@@ -1458,6 +1503,7 @@ async function parseGameMultipart(req) {
     });
 
     busboy.on("file", (name, stream, info) => {
+      info.filename = decodeMultipartFilename(info.filename);
       const isCover = name === "cover";
       const isVideo = name === "video";
       const isGameFile = name === "gameFile";
@@ -1534,6 +1580,249 @@ async function parseGameMultipart(req) {
   });
 }
 
+async function parseDevelopmentDocumentsMultipart(req, maxFiles = 20) {
+  await fsp.mkdir(PRIVATE_DOCUMENT_DIR, { recursive: true });
+  return new Promise((resolve, reject) => {
+    const documents = [];
+    const tasks = [];
+    const createdFiles = [];
+    let parseError = null;
+    let busboy;
+    try {
+      busboy = Busboy({ headers: req.headers, limits: { fields: 5, files: maxFiles, fileSize: MAX_DEVELOPMENT_DOCUMENT_BYTES } });
+    } catch (error) {
+      error.status = 400;
+      reject(error);
+      return;
+    }
+    busboy.on("file", (name, stream, info) => {
+      info.filename = decodeMultipartFilename(info.filename);
+      if (!info.filename || !["documents", "document"].includes(name)) {
+        stream.resume();
+        return;
+      }
+      const extension = path.extname(info.filename).toLowerCase();
+      if (!DEVELOPMENT_DOCUMENT_EXTENSIONS.has(extension)) {
+        parseError ||= Object.assign(new Error("开发文档格式不受支持。请上传 DOC/DOCX、XLS/XLSX、PPT/PPTX、PDF、TXT/MD、ZIP/7Z/RAR。"), { status: 415, code: "DEVELOPMENT_DOCUMENT_TYPE_INVALID" });
+        stream.resume();
+        return;
+      }
+      const storageName = `development-${Date.now()}-${crypto.randomBytes(10).toString("hex")}${extension}`;
+      const target = path.join(PRIVATE_DOCUMENT_DIR, storageName);
+      const digest = crypto.createHash("sha256");
+      let size = 0;
+      createdFiles.push(target);
+      stream.on("data", (chunk) => { size += chunk.length; digest.update(chunk); });
+      const limitMessage = `每份开发文档不能超过 ${Math.round(MAX_DEVELOPMENT_DOCUMENT_BYTES / 1024 / 1024)}MB。`;
+      const limiter = new ByteLimitTransform(MAX_DEVELOPMENT_DOCUMENT_BYTES, limitMessage);
+      const task = pipeline(stream, limiter, fs.createWriteStream(target)).then(() => {
+        if (limiter.exceeded || stream.truncated) throw Object.assign(new Error(limitMessage), { status: 413, code: "DEVELOPMENT_DOCUMENT_TOO_LARGE" });
+        documents.push({
+          id: randomId(), originalName: cleanText(info.filename, 240), storageName,
+          mimeType: cleanText(info.mimeType, 120) || "application/octet-stream", size, sha256: digest.digest("hex")
+        });
+      }).catch((error) => { parseError ||= error; });
+      tasks.push(task);
+    });
+    busboy.on("filesLimit", () => { parseError ||= Object.assign(new Error(`一次最多上传 ${maxFiles} 份开发文档。`), { status: 400 }); });
+    busboy.on("error", reject);
+    busboy.on("close", async () => {
+      try {
+        await Promise.all(tasks);
+        if (parseError) throw parseError;
+        if (!documents.length) throw Object.assign(new Error("请选择需要上传的开发文档。"), { status: 400, code: "DEVELOPMENT_DOCUMENT_REQUIRED" });
+        resolve({ documents, createdFiles });
+      } catch (error) {
+        await Promise.all(createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
+        reject(error);
+      }
+    });
+    const fairUpload = new FairUploadTransform();
+    fairUpload.on("error", reject);
+    req.pipe(fairUpload).pipe(busboy);
+  });
+}
+
+function privateDocumentPath(storageName) {
+  const safeName = path.basename(cleanText(storageName, 260));
+  const target = path.resolve(PRIVATE_DOCUMENT_DIR, safeName);
+  return safeName && target.startsWith(`${PRIVATE_DOCUMENT_DIR}${path.sep}`) ? target : "";
+}
+
+async function removePrivateDocument(storageName) {
+  const target = privateDocumentPath(storageName);
+  if (target) await fsp.unlink(target).catch(() => {});
+}
+
+function resumableUploadSettings(kind, filename, mimeType) {
+  const extension = path.extname(filename || "").toLowerCase();
+  if (kind === "game") {
+    if (![".zip", ".7z", ".rar"].includes(extension)) return null;
+    return { limit: MAX_GAME_FILE_BYTES, destination: UPLOAD_DIR, prefix: "game", publicUrl: true };
+  }
+  if (kind === "video") {
+    if (!String(mimeType || "").startsWith("video/")) return null;
+    return { limit: MAX_VIDEO_BYTES, destination: UPLOAD_DIR, prefix: "video", publicUrl: true };
+  }
+  if (kind === "developmentDocument") {
+    if (!DEVELOPMENT_DOCUMENT_EXTENSIONS.has(extension)) return null;
+    return { limit: MAX_DEVELOPMENT_DOCUMENT_BYTES, destination: PRIVATE_DOCUMENT_DIR, prefix: "development", publicUrl: false };
+  }
+  return null;
+}
+
+function validResumableUploadId(value) {
+  const id = cleanText(value, 100);
+  return /^[a-f0-9-]{16,80}$/i.test(id) ? id : "";
+}
+
+function resumableUploadMetaPath(id) {
+  const safeId = validResumableUploadId(id);
+  return safeId ? path.join(UPLOAD_SESSION_DIR, `${safeId}.json`) : "";
+}
+
+function resumableUploadDataPath(id) {
+  const safeId = validResumableUploadId(id);
+  return safeId ? path.join(UPLOAD_SESSION_DIR, `${safeId}.part`) : "";
+}
+
+async function readResumableUpload(id) {
+  const metaPath = resumableUploadMetaPath(id);
+  if (!metaPath) return null;
+  try {
+    const meta = JSON.parse(await fsp.readFile(metaPath, "utf8"));
+    const safeId = validResumableUploadId(meta?.id);
+    const settings = resumableUploadSettings(cleanText(meta?.kind, 40), cleanText(meta?.originalName, 240), cleanText(meta?.mimeType, 120));
+    if (!safeId || safeId !== id || !settings) return null;
+    const dataPath = resumableUploadDataPath(id);
+    const stat = await fsp.stat(dataPath).catch(() => ({ size: 0 }));
+    return {
+      ...meta,
+      id: safeId,
+      originalName: cleanText(meta.originalName, 240),
+      ownerEmail: normalizeEmail(meta.ownerEmail),
+      size: Math.max(0, Number(meta.size || 0)),
+      receivedBytes: Math.min(Math.max(0, Number(stat.size || 0)), Math.max(0, Number(meta.size || 0))),
+      completed: Boolean(meta.completed),
+      createdAt: cleanText(meta.createdAt, 60),
+      updatedAt: cleanText(meta.updatedAt, 60),
+      settings
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeResumableUpload(meta) {
+  const metaPath = resumableUploadMetaPath(meta?.id);
+  if (!metaPath) throw Object.assign(new Error("上传会话无效。"), { status: 400 });
+  const tempPath = `${metaPath}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(tempPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+  await fsp.rename(tempPath, metaPath);
+}
+
+async function removeResumableUpload(meta) {
+  await Promise.all([resumableUploadMetaPath(meta?.id), resumableUploadDataPath(meta?.id)].filter(Boolean).map((file) => fsp.unlink(file).catch(() => {})));
+}
+
+async function cleanExpiredResumableUploads() {
+  const cutoff = Date.now() - RESUMABLE_UPLOAD_TTL_MS;
+  const entries = await fsp.readdir(UPLOAD_SESSION_DIR, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const id = entry.name.slice(0, -5);
+    const meta = await readResumableUpload(id);
+    if (!meta || Date.parse(meta.updatedAt || meta.createdAt || 0) < cutoff) await removeResumableUpload(meta || { id });
+  }
+}
+
+function resumableUploadPayload(meta) {
+  return {
+    id: meta.id,
+    kind: meta.kind,
+    originalName: meta.originalName,
+    size: meta.size,
+    uploadedBytes: meta.receivedBytes,
+    completed: Boolean(meta.completed),
+    chunkBytes: RESUMABLE_CHUNK_BYTES,
+    expiresAt: new Date(Date.parse(meta.updatedAt || meta.createdAt || Date.now()) + RESUMABLE_UPLOAD_TTL_MS).toISOString()
+  };
+}
+
+async function requireResumableUpload(req, id) {
+  const store = await ensureStore();
+  const record = requireParticipantSession(store, req);
+  const meta = await readResumableUpload(id);
+  if (!meta || meta.ownerEmail !== normalizeEmail(record.session.email)) {
+    const error = new Error("没有找到可继续的上传任务。请重新选择文件后开始上传。" );
+    error.status = 404;
+    error.code = "RESUMABLE_UPLOAD_NOT_FOUND";
+    throw error;
+  }
+  if (Date.parse(meta.updatedAt || meta.createdAt || 0) + RESUMABLE_UPLOAD_TTL_MS < Date.now()) {
+    await removeResumableUpload(meta);
+    const error = new Error("上传任务已过期，请重新选择文件后开始上传。" );
+    error.status = 410;
+    error.code = "RESUMABLE_UPLOAD_EXPIRED";
+    throw error;
+  }
+  return { record, meta };
+}
+
+async function materializeResumableUpload(id, ownerEmail, expectedKind) {
+  const meta = await readResumableUpload(id);
+  if (!meta || meta.ownerEmail !== normalizeEmail(ownerEmail) || meta.kind !== expectedKind || !meta.completed || meta.receivedBytes !== meta.size) {
+    const error = new Error("上传文件尚未完成，请继续上传后再保存作品。" );
+    error.status = 409;
+    error.code = "RESUMABLE_UPLOAD_INCOMPLETE";
+    throw error;
+  }
+  const extension = path.extname(meta.originalName).toLowerCase() || extensionFor(meta.mimeType, meta.originalName);
+  const filename = `${meta.settings.prefix}-${Date.now()}-${crypto.randomBytes(10).toString("hex")}${extension}`;
+  const source = resumableUploadDataPath(meta.id);
+  const target = path.join(meta.settings.destination, filename);
+  try {
+    await fsp.link(source, target);
+  } catch {
+    await fsp.copyFile(source, target);
+  }
+  return {
+    meta,
+    target,
+    file: {
+      ...(meta.settings.publicUrl ? { url: `/uploads/${filename}` } : { storageName: filename }),
+      target,
+      mimeType: meta.mimeType,
+      originalName: meta.originalName,
+      size: meta.size,
+      sha256: meta.sha256 || ""
+    }
+  };
+}
+
+async function finalizeResumableUploads(items) {
+  await Promise.all((items || []).map((item) => removeResumableUpload(item.meta)));
+}
+
+async function attachResumableFilesToParsed(parsed, email) {
+  const items = [];
+  const gameUploadId = validResumableUploadId(parsed.fields.resumableGameFileId);
+  const videoUploadId = validResumableUploadId(parsed.fields.resumableVideoId);
+  if (gameUploadId) {
+    const item = await materializeResumableUpload(gameUploadId, email, "game");
+    parsed.files.gameFile = item.file;
+    parsed.createdFiles.push(item.target);
+    items.push(item);
+  }
+  if (videoUploadId) {
+    const item = await materializeResumableUpload(videoUploadId, email, "video");
+    parsed.files.video = item.file;
+    parsed.createdFiles.push(item.target);
+    items.push(item);
+  }
+  return items;
+}
+
 function cleanUrl(value) {
   const input = cleanText(value, 1000);
   if (!input) return "";
@@ -1565,7 +1854,7 @@ function creatorsFromFields(fields, files, existing = null) {
     const role = cleanText(creator?.role, 40);
     const old = previous.get(cleanText(creator?.id, 80));
     const contribution = creator && typeof creator === "object" && Object.hasOwn(creator, "contribution")
-      ? cleanText(creator.contribution, 300)
+      ? cleanMultilineText(creator.contribution, 300)
       : old?.contribution || "";
     return {
       id: cleanText(creator?.id, 80) || creatorId(name, role, index),
@@ -1621,8 +1910,8 @@ function gameFromFields(fields, files, existing = null, options = {}) {
     title,
     team,
     shortDescription,
-    description: cleanText(fields.description, 1200),
-    creationNote: cleanText(fields.creationNote, 600),
+    description: cleanMultilineText(fields.description, 1200),
+    creationNote: cleanMultilineText(fields.creationNote, 600),
     creators,
     coverUrl: files.cover?.url || (hasCoverUrl ? cleanAssetUrl(fields.coverUrl) : cleanAssetUrl(existing?.coverUrl)) || "",
     uploadedVideoUrl,
@@ -1654,6 +1943,7 @@ function gameFromFields(fields, files, existing = null, options = {}) {
     assetMeta,
     assetHistory: Array.isArray(existing?.assetHistory) ? existing.assetHistory : [],
     downloadHistory: Array.isArray(existing?.downloadHistory) ? existing.downloadHistory : [],
+    developmentDocuments: normalizeDevelopmentDocuments(existing?.developmentDocuments),
     isDemo: false,
     createdAt: existing?.createdAt || now,
     updatedAt: now
@@ -1699,7 +1989,7 @@ function submissionMissingFields(game) {
   const missing = [];
   if (!cleanText(game.title, 60)) missing.push("游戏名称");
   if (!cleanText(game.team, 60)) missing.push("队伍名称");
-  if (!cleanText(game.description, 1200)) missing.push("游戏简介");
+  if (!cleanMultilineText(game.description, 1200)) missing.push("游戏简介");
   if (!cleanAssetUrl(game.coverUrl)) missing.push("游戏封面");
   if (!cleanAssetUrl(game.uploadedVideoUrl) && !cleanUrl(game.videoExternalUrl)) missing.push("演示视频");
   if (!cleanAssetUrl(game.downloadUrl)) missing.push("作品文件");
@@ -1719,6 +2009,7 @@ function participantGamePayload(game, access, settings) {
     firstSubmittedAt: game.firstSubmittedAt || "",
     submittedAt: game.submittedAt || "",
     withdrawnAt: game.withdrawnAt || "",
+    developmentDocuments: normalizeDevelopmentDocuments(game.developmentDocuments),
     lateMarkedAt: game.lateMarkedAt || "",
     role: access.role,
     editableCreatorId: access.member?.creatorId || game.ownerCreatorId || "",
@@ -1778,6 +2069,109 @@ function requestOrigin(req) {
   return `${protocol}://${host.split(",")[0].trim()}`;
 }
 
+async function handleCreateResumableUpload(req, res) {
+  const store = await ensureStore();
+  const record = requireParticipantSession(store, req);
+  const body = await readJson(req);
+  const kind = cleanText(body.kind, 40);
+  const originalName = decodeMultipartFilename(cleanText(body.originalName, 240));
+  const mimeType = cleanText(body.mimeType, 120) || "application/octet-stream";
+  const size = Math.max(0, Number(body.size || 0));
+  const settings = resumableUploadSettings(kind, originalName, mimeType);
+  if (!settings || !Number.isSafeInteger(size) || size < 1 || size > settings.limit) {
+    return json(res, 400, { ok: false, error: "RESUMABLE_UPLOAD_INVALID", message: "文件类型或大小不符合上传要求。" });
+  }
+  const resumeId = validResumableUploadId(body.resumeId);
+  if (resumeId) {
+    const existing = await readResumableUpload(resumeId);
+    if (existing && existing.ownerEmail === normalizeEmail(record.session.email)
+      && existing.kind === kind && existing.originalName === originalName && existing.size === size && existing.mimeType === mimeType) {
+      return json(res, 200, { ok: true, upload: resumableUploadPayload(existing), resumed: true });
+    }
+  }
+  await cleanExpiredResumableUploads();
+  const now = new Date().toISOString();
+  const meta = {
+    id: randomId(), ownerEmail: record.session.email, kind, originalName, mimeType, size,
+    receivedBytes: 0, completed: false, sha256: "", createdAt: now, updatedAt: now
+  };
+  await fsp.writeFile(resumableUploadDataPath(meta.id), Buffer.alloc(0));
+  await writeResumableUpload(meta);
+  return json(res, 201, { ok: true, upload: resumableUploadPayload(meta), resumed: false });
+}
+
+async function handleResumableUploadStatus(req, res, id) {
+  const { meta } = await requireResumableUpload(req, id);
+  return json(res, 200, { ok: true, upload: resumableUploadPayload(meta) });
+}
+
+async function handleResumableUploadChunk(req, res, id) {
+  const { meta } = await requireResumableUpload(req, id);
+  if (meta.completed) return json(res, 409, { ok: false, error: "RESUMABLE_UPLOAD_COMPLETED", message: "该文件已上传完成。" });
+  if (activeResumableUploads.has(meta.id)) return json(res, 409, { ok: false, error: "RESUMABLE_UPLOAD_BUSY", message: "该文件正在写入上一段数据，请稍后重试。" });
+  const offset = Number(req.headers["x-upload-offset"]);
+  if (!Number.isSafeInteger(offset) || offset !== meta.receivedBytes) {
+    return json(res, 409, { ok: false, error: "RESUMABLE_UPLOAD_OFFSET_CONFLICT", message: "上传进度已变化，请从服务器记录的位置继续。", upload: resumableUploadPayload(meta) });
+  }
+  const remaining = meta.size - meta.receivedBytes;
+  const maximumChunkLength = Math.min(RESUMABLE_CHUNK_BYTES, remaining);
+  const declaredLength = req.headers["content-length"] === undefined ? null : Number(req.headers["content-length"]);
+  if (declaredLength !== null && (!Number.isSafeInteger(declaredLength) || declaredLength < 1 || declaredLength > maximumChunkLength)) {
+    return json(res, 400, { ok: false, error: "RESUMABLE_UPLOAD_CHUNK_INVALID", message: "上传分片大小无效。" });
+  }
+  const dataPath = resumableUploadDataPath(meta.id);
+  activeResumableUploads.add(meta.id);
+  try {
+    const limiter = new ByteLimitTransform(maximumChunkLength, "上传分片超过预期大小。");
+    await pipeline(req, new FairUploadTransform(), limiter, fs.createWriteStream(dataPath, { flags: "a" }));
+    if (limiter.exceeded) throw Object.assign(new Error("上传分片超过预期大小。"), { status: 413 });
+    const stat = await fsp.stat(dataPath);
+    const receivedLength = stat.size - offset;
+    if (receivedLength < 1 || receivedLength > maximumChunkLength || (declaredLength !== null && receivedLength !== declaredLength) || stat.size > meta.size) {
+      throw Object.assign(new Error("上传分片长度不一致。"), { status: 409 });
+    }
+    meta.receivedBytes = stat.size;
+    meta.updatedAt = new Date().toISOString();
+    await writeResumableUpload(meta);
+    return json(res, 200, { ok: true, upload: resumableUploadPayload(meta) });
+  } catch (error) {
+    await fsp.truncate(dataPath, offset).catch(() => {});
+    throw error;
+  } finally {
+    activeResumableUploads.delete(meta.id);
+  }
+}
+
+async function sha256File(file) {
+  return new Promise((resolve, reject) => {
+    const digest = crypto.createHash("sha256");
+    const stream = fs.createReadStream(file);
+    stream.on("data", (chunk) => digest.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(digest.digest("hex")));
+  });
+}
+
+async function handleCompleteResumableUpload(req, res, id) {
+  await readJson(req).catch(() => ({}));
+  const { meta } = await requireResumableUpload(req, id);
+  const dataPath = resumableUploadDataPath(meta.id);
+  const stat = await fsp.stat(dataPath).catch(() => ({ size: 0 }));
+  if (stat.size !== meta.size) {
+    meta.receivedBytes = Math.min(stat.size, meta.size);
+    meta.updatedAt = new Date().toISOString();
+    await writeResumableUpload(meta);
+    return json(res, 409, { ok: false, error: "RESUMABLE_UPLOAD_INCOMPLETE", message: "文件尚未传完，请继续上传。", upload: resumableUploadPayload(meta) });
+  }
+  if (!meta.completed) {
+    meta.sha256 = await sha256File(dataPath);
+    meta.completed = true;
+    meta.updatedAt = new Date().toISOString();
+    await writeResumableUpload(meta);
+  }
+  return json(res, 200, { ok: true, upload: resumableUploadPayload(meta) });
+}
+
 async function handleParticipantWorkspace(req, res) {
   const store = await ensureStore();
   const record = requireParticipantSession(store, req);
@@ -1794,6 +2188,7 @@ async function handleParticipantWorkspace(req, res) {
       timeZone: TZ,
       maxVideoBytes: MAX_VIDEO_BYTES,
       maxGameFileBytes: MAX_GAME_FILE_BYTES,
+      maxDevelopmentDocumentBytes: MAX_DEVELOPMENT_DOCUMENT_BYTES,
       videoRetentionDays: Math.round(VIDEO_RETENTION_MS / 86400000)
     }
   });
@@ -1842,7 +2237,18 @@ async function handleParticipantCreateGame(req, res) {
 
 async function handleParticipantUpdateGame(req, res, id) {
   const parsed = await parseGameMultipart(req);
+  let resumableItems = [];
   try {
+    const preflightStore = await ensureStore();
+    const preflightRecord = requireParticipantSession(preflightStore, req);
+    const preflightGame = preflightStore.games.find((game) => game.id === id);
+    if (!preflightGame || !participantRole(preflightGame, preflightRecord.session.email)) {
+      const error = new Error("权限已变更，你已不能修改这款作品。" );
+      error.status = 403;
+      error.code = "PARTICIPANT_PERMISSION_CHANGED";
+      throw error;
+    }
+    resumableItems = await attachResumableFilesToParsed(parsed, preflightRecord.session.email);
     const result = await mutateStore((store) => {
       const record = requireParticipantSession(store, req);
       const index = store.games.findIndex((game) => game.id === id);
@@ -1926,6 +2332,7 @@ async function handleParticipantUpdateGame(req, res, id) {
       }
       return { game: updated, access };
     });
+    await finalizeResumableUploads(resumableItems);
     const store = await ensureStore();
     return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "作品详情已保存。" });
   } catch (error) {
@@ -2099,7 +2506,7 @@ async function handleParticipantAddMember(req, res, id) {
   const email = normalizeEmail(body.email);
   const name = cleanText(body.name, 40);
   const role = cleanText(body.role, 40);
-  const contribution = cleanText(body.contribution, 300);
+  const contribution = cleanMultilineText(body.contribution, 300);
   if (!isValidEmail(email) || !name) return json(res, 400, { ok: false, error: "MEMBER_REQUIRED", message: "请填写队友姓名和有效邮箱。" });
   const result = await mutateStore((store) => {
     const record = requireParticipantSession(store, req);
@@ -2278,7 +2685,7 @@ async function handleParticipantProfile(req, res, id, memberId) {
         ...previous,
         name: cleanText(parsed.fields.name, 40) || previous.name,
         role: cleanText(parsed.fields.role, 40),
-        contribution: cleanText(parsed.fields.contribution, 300),
+        contribution: cleanMultilineText(parsed.fields.contribution, 300),
         avatarUrl: parsed.files.profileAvatar?.url || previous.avatarUrl
       };
       if (index >= 0) creators[index] = next;
@@ -2323,6 +2730,195 @@ async function handleParticipantProfile(req, res, id, memberId) {
     await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
     throw error;
   }
+}
+
+async function handleParticipantDevelopmentDocuments(req, res, id) {
+  const parsed = await parseDevelopmentDocumentsMultipart(req, 20);
+  try {
+    const result = await mutateStore((store) => {
+      const record = requireParticipantSession(store, req);
+      const access = participantGame(store, record.session.email);
+      if (!access || access.game.id !== id) throw Object.assign(new Error("你没有权限管理这款作品的开发文档。"), { status: 403, code: "GAME_ACCESS_DENIED" });
+      const game = access.game;
+      const now = new Date().toISOString();
+      const added = parsed.documents.map((document) => ({ ...document, uploadedBy: record.session.email, uploadedAt: now, updatedAt: now }));
+      game.developmentDocuments = [...normalizeDevelopmentDocuments(game.developmentDocuments), ...added];
+      game.updatedAt = now;
+      game.revision = Number(game.revision || 1) + 1;
+      for (const document of added) addAudit(store, {
+        action: "development_document_uploaded", actorType: "participant", actorId: record.session.id,
+        actorEmail: record.session.email, gameId: game.id, documentId: document.id, after: { ...document }
+      });
+      return { game, access };
+    });
+    const store = await ensureStore();
+    return json(res, 201, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: `已将 ${parsed.documents.length} 份开发文档写入内部资料舱。` });
+  } catch (error) {
+    await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
+    throw error;
+  }
+}
+
+async function handleParticipantAttachDevelopmentDocuments(req, res, id) {
+  const body = await readJson(req);
+  const ids = [...new Set((Array.isArray(body.uploadIds) ? body.uploadIds : []).map(validResumableUploadId).filter(Boolean))].slice(0, 20);
+  if (!ids.length) return json(res, 400, { ok: false, error: "RESUMABLE_UPLOAD_REQUIRED", message: "没有可写入的开发文档。" });
+  const preflightStore = await ensureStore();
+  const record = requireParticipantSession(preflightStore, req);
+  const access = participantGame(preflightStore, record.session.email);
+  if (!access || access.game.id !== id) return json(res, 403, { ok: false, error: "GAME_ACCESS_DENIED", message: "你没有权限管理这款作品的开发文档。" });
+  const items = [];
+  try {
+    for (const uploadId of ids) items.push(await materializeResumableUpload(uploadId, record.session.email, "developmentDocument"));
+    const result = await mutateStore((store) => {
+      const currentRecord = requireParticipantSession(store, req);
+      const currentAccess = participantGame(store, currentRecord.session.email);
+      if (!currentAccess || currentAccess.game.id !== id) throw Object.assign(new Error("权限已变更，你已不能修改这款作品。"), { status: 403, code: "GAME_ACCESS_DENIED" });
+      const game = currentAccess.game;
+      const now = new Date().toISOString();
+      const added = items.map((item) => ({
+        id: randomId(), originalName: item.file.originalName, storageName: item.file.storageName,
+        mimeType: item.file.mimeType, size: item.file.size, sha256: item.file.sha256,
+        uploadedBy: currentRecord.session.email, uploadedAt: now, updatedAt: now
+      }));
+      game.developmentDocuments = [...normalizeDevelopmentDocuments(game.developmentDocuments), ...added];
+      game.updatedAt = now;
+      game.revision = Number(game.revision || 1) + 1;
+      for (const document of added) addAudit(store, {
+        action: "development_document_uploaded", actorType: "participant", actorId: currentRecord.session.id,
+        actorEmail: currentRecord.session.email, gameId: game.id, documentId: document.id, after: { ...document }
+      });
+      return { game, access: currentAccess };
+    });
+    await finalizeResumableUploads(items);
+    const store = await ensureStore();
+    return json(res, 201, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: `已将 ${items.length} 份开发文档写入内部资料舱。` });
+  } catch (error) {
+    await Promise.all(items.map((item) => fsp.unlink(item.target).catch(() => {})));
+    throw error;
+  }
+}
+
+async function handleParticipantReplaceDevelopmentDocument(req, res, id, documentId) {
+  const parsed = await parseDevelopmentDocumentsMultipart(req, 1);
+  const replacement = parsed.documents[0];
+  let retiredStorageName = "";
+  try {
+    const result = await mutateStore((store) => {
+      const record = requireParticipantSession(store, req);
+      const access = participantGame(store, record.session.email);
+      if (!access || access.game.id !== id) throw Object.assign(new Error("你没有权限管理这款作品的开发文档。"), { status: 403, code: "GAME_ACCESS_DENIED" });
+      const game = access.game;
+      const documents = normalizeDevelopmentDocuments(game.developmentDocuments);
+      const index = documents.findIndex((document) => document.id === documentId);
+      if (index < 0) throw Object.assign(new Error("没有找到需要替换的开发文档。"), { status: 404 });
+      const before = documents[index];
+      retiredStorageName = before.storageName;
+      const now = new Date().toISOString();
+      const after = { ...replacement, id: before.id, uploadedBy: record.session.email, uploadedAt: before.uploadedAt || now, updatedAt: now };
+      documents[index] = after;
+      game.developmentDocuments = documents;
+      game.updatedAt = now;
+      game.revision = Number(game.revision || 1) + 1;
+      addAudit(store, {
+        action: "development_document_replaced", actorType: "participant", actorId: record.session.id,
+        actorEmail: record.session.email, gameId: game.id, documentId, before, after
+      });
+      return { game, access };
+    });
+    await removePrivateDocument(retiredStorageName);
+    const store = await ensureStore();
+    return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "开发文档已替换；旧文件实体已清除，版本信息保留在审计记录中。" });
+  } catch (error) {
+    await Promise.all(parsed.createdFiles.map((file) => fsp.unlink(file).catch(() => {})));
+    throw error;
+  }
+}
+
+async function handleParticipantAttachReplacementDevelopmentDocument(req, res, id, documentId) {
+  const body = await readJson(req);
+  const uploadId = validResumableUploadId(body.uploadId);
+  if (!uploadId) return json(res, 400, { ok: false, error: "RESUMABLE_UPLOAD_REQUIRED", message: "没有可替换的开发文档。" });
+  const preflightStore = await ensureStore();
+  const record = requireParticipantSession(preflightStore, req);
+  const access = participantGame(preflightStore, record.session.email);
+  if (!access || access.game.id !== id) return json(res, 403, { ok: false, error: "GAME_ACCESS_DENIED", message: "你没有权限管理这款作品的开发文档。" });
+  let item;
+  let retiredStorageName = "";
+  try {
+    item = await materializeResumableUpload(uploadId, record.session.email, "developmentDocument");
+    const result = await mutateStore((store) => {
+      const currentRecord = requireParticipantSession(store, req);
+      const currentAccess = participantGame(store, currentRecord.session.email);
+      if (!currentAccess || currentAccess.game.id !== id) throw Object.assign(new Error("权限已变更，你已不能修改这款作品。"), { status: 403, code: "GAME_ACCESS_DENIED" });
+      const game = currentAccess.game;
+      const documents = normalizeDevelopmentDocuments(game.developmentDocuments);
+      const index = documents.findIndex((document) => document.id === documentId);
+      if (index < 0) throw Object.assign(new Error("没有找到需要替换的开发文档。"), { status: 404 });
+      const before = documents[index];
+      retiredStorageName = before.storageName;
+      const now = new Date().toISOString();
+      const after = {
+        id: before.id, originalName: item.file.originalName, storageName: item.file.storageName,
+        mimeType: item.file.mimeType, size: item.file.size, sha256: item.file.sha256,
+        uploadedBy: currentRecord.session.email, uploadedAt: before.uploadedAt || now, updatedAt: now
+      };
+      documents[index] = after;
+      game.developmentDocuments = documents;
+      game.updatedAt = now;
+      game.revision = Number(game.revision || 1) + 1;
+      addAudit(store, {
+        action: "development_document_replaced", actorType: "participant", actorId: currentRecord.session.id,
+        actorEmail: currentRecord.session.email, gameId: game.id, documentId, before, after
+      });
+      return { game, access: currentAccess };
+    });
+    await removePrivateDocument(retiredStorageName);
+    await finalizeResumableUploads([item]);
+    const store = await ensureStore();
+    return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "开发文档已替换；旧文件实体已清除，版本信息保留在审计记录中。" });
+  } catch (error) {
+    if (item?.target) await fsp.unlink(item.target).catch(() => {});
+    throw error;
+  }
+}
+
+async function handleParticipantDeleteDevelopmentDocument(req, res, id, documentId) {
+  let removedStorageName = "";
+  const result = await mutateStore((store) => {
+    const record = requireParticipantSession(store, req);
+    const access = participantGame(store, record.session.email);
+    if (!access || access.game.id !== id) throw Object.assign(new Error("你没有权限管理这款作品的开发文档。"), { status: 403, code: "GAME_ACCESS_DENIED" });
+    const game = access.game;
+    const documents = normalizeDevelopmentDocuments(game.developmentDocuments);
+    const index = documents.findIndex((document) => document.id === documentId);
+    if (index < 0) throw Object.assign(new Error("没有找到需要移除的开发文档。"), { status: 404 });
+    const [before] = documents.splice(index, 1);
+    removedStorageName = before.storageName;
+    game.developmentDocuments = documents;
+    game.updatedAt = new Date().toISOString();
+    game.revision = Number(game.revision || 1) + 1;
+    addAudit(store, {
+      action: "development_document_removed", actorType: "participant", actorId: record.session.id,
+      actorEmail: record.session.email, gameId: game.id, documentId, before, after: null
+    });
+    return { game, access };
+  });
+  await removePrivateDocument(removedStorageName);
+  const store = await ensureStore();
+  return json(res, 200, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "开发文档已移除，文件实体已清除。" });
+}
+
+async function handleParticipantDownloadDevelopmentDocument(req, res, id, documentId) {
+  const store = await ensureStore();
+  const record = requireParticipantSession(store, req);
+  const access = participantGame(store, record.session.email);
+  if (!access || access.game.id !== id) return json(res, 403, { ok: false, error: "GAME_ACCESS_DENIED", message: "你没有权限下载这款作品的开发文档。" });
+  const document = normalizeDevelopmentDocuments(access.game.developmentDocuments).find((item) => item.id === documentId);
+  if (!document) return notFound(res);
+  const target = privateDocumentPath(document.storageName);
+  if (!target) return notFound(res);
+  return serveFile(res, target, { noStore: true, downloadName: document.originalName });
 }
 
 async function handleAdminSession(req, res, url) {
@@ -2647,6 +3243,178 @@ async function handleAdminAudit(req, res, url) {
     return true;
   }).slice(-limit).reverse();
   return json(res, 200, { ok: true, audit, total: audit.length });
+}
+
+function archiveSafeName(value, fallback = "未命名") {
+  const cleaned = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ").replace(/\s+/g, " ").replace(/[. ]+$/g, "").trim();
+  return (cleaned || fallback).slice(0, 100);
+}
+
+function shanghaiTimestamp(value) {
+  const date = new Date(value || 0);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+  }).format(date);
+}
+
+function exportMemberRows(game) {
+  const creators = normalizeCreators(game.creators);
+  const owner = creators.find((creator) => creator.id === game.ownerCreatorId) || creators[0] || {};
+  const rows = [{
+    身份: "负责人", 姓名: owner.name || "", 职能: owner.role || "负责人", 工作内容: owner.contribution || "",
+    邮箱: normalizeEmail(game.ownerEmail), 当前权限: gameStatus(game) === "abandoned" ? "已释放" : "有效", 首次登录: ""
+  }];
+  for (const member of normalizeTeamMembers(game.teamMembers)) {
+    const creator = creators.find((item) => item.id === member.creatorId) || {};
+    rows.push({
+      身份: "队友", 姓名: creator.name || "", 职能: creator.role || "", 工作内容: creator.contribution || "",
+      邮箱: member.email, 当前权限: member.active ? "有效" : "已移除", 首次登录: shanghaiTimestamp(member.firstLoginAt)
+    });
+  }
+  return rows;
+}
+
+async function buildGameInformationWorkbook(store, game, counts) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "溯造 MiniGame 轨道控制台";
+  workbook.created = new Date();
+  const info = workbook.addWorksheet("作品信息", { views: [{ state: "frozen", ySplit: 1 }] });
+  info.columns = [{ header: "字段", key: "field", width: 25 }, { header: "内容", key: "value", width: 80 }];
+  const rows = [
+    ["作品 ID", game.id], ["游戏名称", game.title], ["队伍名称", game.team], ["一句话介绍", game.shortDescription],
+    ["游戏简介", game.description], ["创作手记", game.creationNote], ["标签", (game.tags || []).join("、")],
+    ["状态", gameStatus(game)], ["创建时间（北京时间）", shanghaiTimestamp(game.createdAt)],
+    ["首次提交时间（北京时间）", shanghaiTimestamp(game.firstSubmittedAt)], ["当前提交时间（北京时间）", shanghaiTimestamp(game.submittedAt)],
+    ["撤回时间（北京时间）", shanghaiTimestamp(game.withdrawnAt)], ["最后修改时间（北京时间）", shanghaiTimestamp(game.updatedAt)],
+    ["补交状态", game.lateSubmission ? "是" : "否"], ["补交标记时间（北京时间）", shanghaiTimestamp(game.lateMarkedAt)],
+    ["有效票数", counts[game.id] || 0], ["负责人邮箱", normalizeEmail(game.ownerEmail)]
+  ];
+  rows.forEach(([field, value]) => info.addRow({ field, value: value ?? "" }));
+  const members = workbook.addWorksheet("制作人员", { views: [{ state: "frozen", ySplit: 1 }] });
+  members.columns = Object.keys(exportMemberRows(game)[0]).map((key) => ({ header: key, key, width: key === "工作内容" ? 50 : key === "邮箱" ? 34 : 20 }));
+  exportMemberRows(game).forEach((row) => members.addRow(row));
+  const audits = workbook.addWorksheet("审计索引", { views: [{ state: "frozen", ySplit: 1 }] });
+  audits.columns = [
+    { header: "时间（北京时间）", key: "createdAt", width: 24 }, { header: "动作", key: "action", width: 34 },
+    { header: "操作者类型", key: "actorType", width: 18 }, { header: "操作者邮箱/ID", key: "actor", width: 38 },
+    { header: "原因", key: "reason", width: 50 }, { header: "审计记录 ID", key: "id", width: 40 }
+  ];
+  store.audit.filter((event) => event.gameId === game.id).forEach((event) => audits.addRow({
+    createdAt: shanghaiTimestamp(event.createdAt), action: event.action || "", actorType: event.actorType || "",
+    actor: event.actorEmail || event.actorId || "", reason: event.reason || "", id: event.id || ""
+  }));
+  for (const sheet of workbook.worksheets) {
+    sheet.getRow(1).font = { bold: true, color: { argb: "FF11130F" } };
+    sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB8D94E" } };
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columnCount } };
+    sheet.eachRow((row) => { row.alignment = { vertical: "top", wrapText: true }; });
+  }
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+function localUploadPath(url) {
+  if (!String(url || "").startsWith("/uploads/")) return "";
+  const target = path.resolve(UPLOAD_DIR, path.basename(url));
+  return target.startsWith(`${UPLOAD_DIR}${path.sep}`) ? target : "";
+}
+
+async function appendFileIfPresent(archive, source, archiveName, missing) {
+  if (!source) return false;
+  try {
+    const stat = await fsp.stat(source);
+    if (!stat.isFile()) throw Object.assign(new Error("not a file"), { code: "ENOENT" });
+    archive.file(source, { name: archiveName });
+    return true;
+  } catch {
+    missing.push(`${archiveName}（文件实体缺失）`);
+    return false;
+  }
+}
+
+async function appendGameArchive(archive, store, game, folder, counts) {
+  const root = folder ? `${folder}/` : "";
+  const audit = store.audit.filter((event) => event.gameId === game.id);
+  archive.append(await buildGameInformationWorkbook(store, game, counts), { name: `${root}作品信息.xlsx` });
+  archive.append(`${JSON.stringify(audit, null, 2)}\n`, { name: `${root}完整审计记录.json` });
+  const missing = [];
+  await appendFileIfPresent(archive, localUploadPath(game.coverUrl), `${root}封面/${archiveSafeName(game.assetMeta?.cover?.originalName || path.basename(game.coverUrl || "封面"), "封面")}`, missing);
+  await appendFileIfPresent(archive, localUploadPath(game.uploadedVideoUrl), `${root}演示视频/${archiveSafeName(game.assetMeta?.video?.originalName || path.basename(game.uploadedVideoUrl || "演示视频"), "演示视频")}`, missing);
+  await appendFileIfPresent(archive, localUploadPath(game.downloadUrl), `${root}游戏包体/${archiveSafeName(game.assetMeta?.gameFile?.originalName || path.basename(game.downloadUrl || "游戏包体"), "游戏包体")}`, missing);
+  const creators = normalizeCreators(game.creators);
+  for (let index = 0; index < creators.length; index += 1) {
+    const creator = creators[index];
+    if (!creator.avatarUrl) continue;
+    const extension = path.extname(creator.avatarUrl) || ".bin";
+    await appendFileIfPresent(archive, localUploadPath(creator.avatarUrl), `${root}成员头像/${String(index + 1).padStart(2, "0")}-${archiveSafeName(creator.name, "成员")}${extension}`, missing);
+  }
+  const usedDocumentNames = new Set();
+  for (const document of normalizeDevelopmentDocuments(game.developmentDocuments)) {
+    const safeName = archiveSafeName(document.originalName, "开发文档");
+    const extension = path.extname(safeName);
+    const stem = safeName.slice(0, safeName.length - extension.length) || "开发文档";
+    let uniqueName = safeName;
+    let sequence = 2;
+    while (usedDocumentNames.has(uniqueName.toLowerCase())) uniqueName = `${stem}-${sequence++}${extension}`;
+    usedDocumentNames.add(uniqueName.toLowerCase());
+    await appendFileIfPresent(archive, privateDocumentPath(document.storageName), `${root}开发文档/${uniqueName}`, missing);
+  }
+  const external = [];
+  if (cleanUrl(game.videoExternalUrl)) external.push(`公开视频链接：${game.videoExternalUrl}`);
+  if (cleanUrl(game.coverUrl)) external.push(`外部封面链接：${game.coverUrl}`);
+  if (cleanUrl(game.downloadUrl)) external.push(`外部游戏地址：${game.downloadUrl}`);
+  archive.append(`${external.length ? external.join("\n") : "本作品没有需要单独记录的外部链接。"}\n`, { name: `${root}外部链接.txt` });
+  if (missing.length) archive.append(`${missing.join("\n")}\n`, { name: `${root}缺失文件记录.txt` });
+}
+
+async function handleAdminCreateArchiveTicket(req, res, url) {
+  if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
+  const body = await readJson(req);
+  const scope = body.scope === "all" ? "all" : "game";
+  const store = await ensureStore();
+  const gameId = cleanText(body.gameId, 100);
+  if (scope === "game" && !store.games.some((game) => game.id === gameId)) return notFound(res);
+  const token = crypto.randomBytes(32).toString("hex");
+  exportTickets.set(token, { scope, gameId, expiresAt: Date.now() + 2 * 60 * 1000 });
+  for (const [key, ticket] of exportTickets) if (ticket.expiresAt < Date.now()) exportTickets.delete(key);
+  return json(res, 201, { ok: true, downloadUrl: `/api/admin/export/archive/${token}`, expiresInSeconds: 120 });
+}
+
+async function handleAdminArchiveDownload(req, res, token) {
+  const ticket = exportTickets.get(token);
+  exportTickets.delete(token);
+  if (!ticket || ticket.expiresAt < Date.now()) return json(res, 410, { ok: false, error: "EXPORT_TICKET_EXPIRED", message: "导出凭证已失效，请重新点击导出。" });
+  const store = await ensureStore();
+  const games = ticket.scope === "all" ? store.games.slice() : store.games.filter((game) => game.id === ticket.gameId);
+  if (!games.length && ticket.scope === "game") return notFound(res);
+  const counts = voteCounts(store);
+  const eventName = archiveSafeName(store.settings.eventTitle, "溯造MiniGame");
+  const filename = ticket.scope === "all" ? `${eventName}-全部作品归档.zip` : `${archiveSafeName(games[0].title, "未命名作品")}-作品归档.zip`;
+  res.writeHead(200, {
+    "content-type": "application/zip", "content-disposition": `attachment; filename="minigame-archive.zip"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    "cache-control": "no-store", "x-content-type-options": "nosniff"
+  });
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  archive.on("warning", (error) => { if (error.code !== "ENOENT") res.destroy(error); });
+  archive.on("error", (error) => res.destroy(error));
+  archive.pipe(res);
+  for (let index = 0; index < games.length; index += 1) {
+    const game = games[index];
+    const folder = ticket.scope === "all" ? `${String(index + 1).padStart(2, "0")}-${archiveSafeName(game.title, "未命名作品")}` : "";
+    await appendGameArchive(archive, store, game, folder, counts);
+  }
+  await archive.finalize();
+}
+
+async function handleAdminDownloadDevelopmentDocument(req, res, url, id, documentId) {
+  if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
+  const store = await ensureStore();
+  const game = store.games.find((item) => item.id === id);
+  const document = normalizeDevelopmentDocuments(game?.developmentDocuments).find((item) => item.id === documentId);
+  if (!document) return notFound(res);
+  const target = privateDocumentPath(document.storageName);
+  if (!target) return notFound(res);
+  return serveFile(res, target, { noStore: true, downloadName: document.originalName });
 }
 
 async function handleAdminDeleteVoter(req, res, url, id) {
@@ -2989,6 +3757,25 @@ async function router(req, res) {
       if (req.method !== "GET") return methodNotAllowed(res);
       return await handleParticipantWorkspace(req, res);
     }
+    if (url.pathname === "/api/participant/uploads") {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleCreateResumableUpload(req, res);
+    }
+    const resumableUploadMatch = url.pathname.match(/^\/api\/participant\/uploads\/([a-f0-9-]{16,80})$/i);
+    if (resumableUploadMatch) {
+      if (req.method !== "GET") return methodNotAllowed(res);
+      return await handleResumableUploadStatus(req, res, resumableUploadMatch[1]);
+    }
+    const resumableUploadChunkMatch = url.pathname.match(/^\/api\/participant\/uploads\/([a-f0-9-]{16,80})\/chunk$/i);
+    if (resumableUploadChunkMatch) {
+      if (req.method !== "PUT") return methodNotAllowed(res);
+      return await handleResumableUploadChunk(req, res, resumableUploadChunkMatch[1]);
+    }
+    const resumableUploadCompleteMatch = url.pathname.match(/^\/api\/participant\/uploads\/([a-f0-9-]{16,80})\/complete$/i);
+    if (resumableUploadCompleteMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleCompleteResumableUpload(req, res, resumableUploadCompleteMatch[1]);
+    }
     if (url.pathname === "/api/participant/games") {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleParticipantCreateGame(req, res);
@@ -3012,6 +3799,34 @@ async function router(req, res) {
     if (participantMembersMatch) {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleParticipantAddMember(req, res, decodeURIComponent(participantMembersMatch[1]));
+    }
+    const participantDocumentsMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/development-documents$/);
+    if (participantDocumentsMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantDevelopmentDocuments(req, res, decodeURIComponent(participantDocumentsMatch[1]));
+    }
+    const participantDocumentsAttachMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/development-documents\/attach$/);
+    if (participantDocumentsAttachMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantAttachDevelopmentDocuments(req, res, decodeURIComponent(participantDocumentsAttachMatch[1]));
+    }
+    const participantDocumentAttachMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/development-documents\/([^/]+)\/attach$/);
+    if (participantDocumentAttachMatch) {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleParticipantAttachReplacementDevelopmentDocument(req, res, decodeURIComponent(participantDocumentAttachMatch[1]), decodeURIComponent(participantDocumentAttachMatch[2]));
+    }
+    const participantDocumentMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/development-documents\/([^/]+)$/);
+    if (participantDocumentMatch) {
+      const gameId = decodeURIComponent(participantDocumentMatch[1]);
+      const documentId = decodeURIComponent(participantDocumentMatch[2]);
+      if (req.method === "PUT") return await handleParticipantReplaceDevelopmentDocument(req, res, gameId, documentId);
+      if (req.method === "DELETE") return await handleParticipantDeleteDevelopmentDocument(req, res, gameId, documentId);
+      return methodNotAllowed(res);
+    }
+    const participantDocumentDownloadMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/development-documents\/([^/]+)\/download$/);
+    if (participantDocumentDownloadMatch) {
+      if (req.method !== "GET") return methodNotAllowed(res);
+      return await handleParticipantDownloadDevelopmentDocument(req, res, decodeURIComponent(participantDocumentDownloadMatch[1]), decodeURIComponent(participantDocumentDownloadMatch[2]));
     }
     const participantMemberMatch = url.pathname.match(/^\/api\/participant\/games\/([^/]+)\/members\/([^/]+)$/);
     if (participantMemberMatch) {
@@ -3037,6 +3852,20 @@ async function router(req, res) {
     if (url.pathname === "/api/admin/games") {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleAdminCreateGame(req, res, url);
+    }
+    if (url.pathname === "/api/admin/export/archive-ticket") {
+      if (req.method !== "POST") return methodNotAllowed(res);
+      return await handleAdminCreateArchiveTicket(req, res, url);
+    }
+    const archiveDownloadMatch = url.pathname.match(/^\/api\/admin\/export\/archive\/([a-f0-9]{64})$/);
+    if (archiveDownloadMatch) {
+      if (req.method !== "GET") return methodNotAllowed(res);
+      return await handleAdminArchiveDownload(req, res, archiveDownloadMatch[1]);
+    }
+    const adminDevelopmentDocumentMatch = url.pathname.match(/^\/api\/admin\/games\/([^/]+)\/development-documents\/([^/]+)\/download$/);
+    if (adminDevelopmentDocumentMatch) {
+      if (req.method !== "GET") return methodNotAllowed(res);
+      return await handleAdminDownloadDevelopmentDocument(req, res, url, decodeURIComponent(adminDevelopmentDocumentMatch[1]), decodeURIComponent(adminDevelopmentDocumentMatch[2]));
     }
     const discardDraftMatch = url.pathname.match(/^\/api\/admin\/games\/([^/]+)\/discard-draft$/);
     if (discardDraftMatch) {
@@ -3103,6 +3932,7 @@ async function router(req, res) {
   } catch (error) {
     const status = error.status || 500;
     console.error(error);
+    if (res.headersSent) return res.destroy(error);
     return json(res, status, {
       ok: false,
       error: error.code || "SERVER_ERROR",

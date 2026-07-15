@@ -33,7 +33,7 @@
 - 完成邮箱验证的参赛者可进入 `/submit`，使用“草稿、提交参展”流程创建作品
 - 每款作品只有一个负责人，负责人可管理队友、提交与撤回；队友可编辑内容和自己的资料
 - 作品禁止物理删除。撤回会隐藏作品、归还相关可能性核心并永久保留审计
-- 上传本地游戏封面、最大 200MB 演示视频、最大 2GB 作品压缩包与最多 12 位成员头像，也可使用外部媒体地址
+- 上传本地游戏封面、最大 200MB 演示视频、最大 2GB 作品压缩包、内部开发文档与最多 12 位成员头像，也可使用外部媒体地址；视频、作品包和开发文档会分片传输，网络中断后可从已完成进度继续
 - 参展截止、投票截止与管理员手动宇宙点亮彼此独立
 - 截止后提交、重新提交或替换作品文件会产生可审计的“补交”标记
 - 配置活动名称、主题、标语、三个时间与固定星图种子
@@ -89,6 +89,9 @@ ALLOW_DEV_OTP=false
 ```env
 MINIGAME_DATA_FILE=/var/lib/suyo-minigame/minigame.json
 MINIGAME_UPLOAD_DIR=/var/lib/suyo-minigame/uploads
+MINIGAME_UPLOAD_SESSION_DIR=/var/lib/suyo-minigame/upload-sessions
+RESUMABLE_UPLOAD_CHUNK_MB=8
+RESUMABLE_UPLOAD_TTL_HOURS=48
 MAX_GAME_FILE_MB=2048
 UPLOAD_PER_REQUEST_MBIT=150
 # 设置为服务器实测入站带宽的 85%-90%，应用会在活跃上传之间动态均分；0 表示只使用单请求上限。

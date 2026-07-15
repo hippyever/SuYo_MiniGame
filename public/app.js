@@ -131,6 +131,10 @@ function escapeHTML(value) {
   })[character]);
 }
 
+function renderMarkdown(value) {
+  return window.SuyoMarkdown?.render(value) || `<p>${escapeHTML(value)}</p>`;
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1688,7 +1692,7 @@ function creatorNodes(game) {
 }
 
 function creatorCaptionMarkup(creator) {
-  return `<strong>${escapeHTML(creator.name || "未命名成员")}</strong><span>${escapeHTML(creator.role || "制作人员")}</span><small>${escapeHTML(creator.contribution || "尚未填写具体工作贡献。")}</small>`;
+  return `<strong>${escapeHTML(creator.name || "未命名成员")}</strong><span>${escapeHTML(creator.role || "制作人员")}</span><div class="markdown-content markdown-compact">${renderMarkdown(creator.contribution || "尚未填写具体工作贡献。")}</div>`;
 }
 
 function stopCreatorOrbit() {
@@ -1936,8 +1940,8 @@ function populateDetail(game) {
   $("#detailTeam").textContent = game.team;
   $("#detailTitle").textContent = game.title;
   $("#detailShort").textContent = game.shortDescription || "";
-  $("#detailDescription").textContent = game.description || game.shortDescription || "游戏简介暂未填写。";
-  $("#detailCreationNote").textContent = game.creationNote || "创作手记暂未填写。";
+  $("#detailDescription").innerHTML = renderMarkdown(game.description || game.shortDescription || "游戏简介暂未填写。");
+  $("#detailCreationNote").innerHTML = renderMarkdown(game.creationNote || "创作手记暂未填写。");
   $("#detailLateBadge").hidden = !game.lateSubmission;
   $("#creationNoteSection").hidden = !game.creationNote;
   $("#detailTags").innerHTML = (game.tags || []).map((tag) => `<span>${escapeHTML(tag)}</span>`).join("");

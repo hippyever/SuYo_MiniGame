@@ -137,8 +137,13 @@ function renderGames() {
         ${game.status === "abandoned"
           ? `<label class="owner-binding"><span>作品归属</span><em>已释放（审计保留）</em></label>`
           : `<label class="owner-binding"><span>唯一负责人邮箱</span><input type="email" data-owner-email="${escapeHTML(game.id)}" value="${escapeHTML(game.ownerEmail || "")}" placeholder="name@example.com" /></label>`}
+        <div class="admin-private-documents">
+          <span>内部开发文档 · ${(game.developmentDocuments || []).length} 份</span>
+          ${(game.developmentDocuments || []).map((document) => `<button type="button" data-admin-document="${escapeHTML(game.id)}:${escapeHTML(document.id)}" title="仅后台与本队可见">${escapeHTML(document.originalName)}</button>`).join("") || `<em>尚无内部文件</em>`}
+        </div>
       </div>
       <div class="admin-row-actions">
+        <button class="text-action" data-export-game="${escapeHTML(game.id)}" type="button">导出归档</button>
         ${game.status !== "abandoned" ? `<button class="text-action" data-edit-game="${escapeHTML(game.id)}" type="button">编辑</button>
         <button class="text-action" data-bind-owner="${escapeHTML(game.id)}" type="button">绑定负责人</button>` : ""}
         ${game.lateSubmission ? `<button class="text-action danger-action" data-clear-late="${escapeHTML(game.id)}" type="button">复核补交标记</button>` : ""}
@@ -150,6 +155,11 @@ function renderGames() {
   $$('[data-bind-owner]', list).forEach((button) => button.addEventListener("click", () => bindOwner(button.dataset.bindOwner)));
   $$('[data-clear-late]', list).forEach((button) => button.addEventListener("click", () => clearLateMarker(button.dataset.clearLate)));
   $$('[data-discard-draft]', list).forEach((button) => button.addEventListener("click", () => discardDraft(button.dataset.discardDraft)));
+  $$('[data-export-game]', list).forEach((button) => button.addEventListener("click", () => exportGameArchive(button.dataset.exportGame, button)));
+  $$('[data-admin-document]', list).forEach((button) => button.addEventListener("click", () => {
+    const [gameId, documentId] = button.dataset.adminDocument.split(":");
+    downloadAdminDocument(gameId, documentId, button);
+  }));
 }
 
 function gameStatusLabel(game) {
@@ -662,6 +672,51 @@ async function exportCsv({ button, endpoint, filename, idleLabel }) {
   }
 }
 
+async function startArchiveExport({ scope, gameId = "", button, idleLabel }) {
+  button.disabled = true;
+  button.textContent = "正在生成归档";
+  try {
+    const ticket = await adminFetch("/api/admin/export/archive-ticket", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope, gameId })
+    });
+    const anchor = document.createElement("a");
+    anchor.href = ticket.downloadUrl;
+    anchor.download = "";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    showToast(scope === "all" ? "全部作品归档已开始下载" : "作品归档已开始下载");
+  } catch (error) { showToast(error.message); }
+  finally { button.disabled = false; button.textContent = idleLabel; }
+}
+
+function exportGameArchive(gameId, button) {
+  return startArchiveExport({ scope: "game", gameId, button, idleLabel: "导出归档" });
+}
+
+function exportAllGames() {
+  return startArchiveExport({ scope: "all", button: $("#exportAllGames"), idleLabel: "导出全部作品" });
+}
+
+async function downloadAdminDocument(gameId, documentId, button) {
+  const game = gameById(gameId);
+  const document = (game?.developmentDocuments || []).find((item) => item.id === documentId);
+  const idleLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "读取中";
+  try {
+    const response = await adminFetch(`/api/admin/games/${encodeURIComponent(gameId)}/development-documents/${encodeURIComponent(documentId)}/download`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = document?.originalName || "开发文档";
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { showToast(error.message); }
+  finally { button.disabled = false; button.textContent = idleLabel; }
+}
+
 function exportVotes() {
   return exportCsv({ button: $("#exportVotes"), endpoint: "/api/admin/export/votes.csv", filename: "suyo-minigame-votes.csv", idleLabel: "导出选票" });
 }
@@ -717,6 +772,7 @@ function init() {
   $("#auditFilterForm").addEventListener("submit", filterAudit);
   $("#exportVotes").addEventListener("click", exportVotes);
   $("#exportAudit").addEventListener("click", exportAudit);
+  $("#exportAllGames").addEventListener("click", exportAllGames);
   $("#voterSearch").addEventListener("input", (event) => {
     adminState.voterQuery = event.target.value;
     renderBallots();

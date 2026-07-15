@@ -85,6 +85,14 @@ UPLOAD_TOTAL_MBIT=180
 
 应用会按当前活跃上传数动态均分 `UPLOAD_TOTAL_MBIT`。Nginx 同时把单个 IP 的上传连接限制为 2 条，降低单个用户以多连接挤占带宽的可能。修改后需要重启服务并重新加载 Nginx。
 
+视频、作品压缩包和开发文档使用 8MB 分片上传。连接中断时，服务端会保留已收到的分片 48 小时；用户保持文件选择后点击保存/上传即可续传，刷新页面后重新选择同一文件也会识别进度。可按需在 `/etc/suyo-minigame.env` 调整：
+
+```env
+MINIGAME_UPLOAD_SESSION_DIR=/var/lib/suyo-minigame/upload-sessions
+RESUMABLE_UPLOAD_CHUNK_MB=8
+RESUMABLE_UPLOAD_TTL_HOURS=48
+```
+
 ## 访问
 
 ```text
