@@ -59,6 +59,7 @@ const state = {
   creatorOrbitFrame: null,
   creatorOrbitStartedAt: 0,
   pendingVoteId: "",
+  pendingInvitedIdentity: false,
   pendingBallotOpen: false,
   pendingReplacementId: "",
   pendingBallotRetry: null,
@@ -2222,6 +2223,31 @@ function validateProfile() {
   return identity;
 }
 
+function codeRequestIdentity() {
+  const identity = profileValues();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(identity.email)) {
+    setMessage($("#authMessage"), "请先填写有效邮箱。", true);
+    return null;
+  }
+  return identity;
+}
+
+function setInvitedIdentityMode(active) {
+  state.pendingInvitedIdentity = Boolean(active);
+  const form = $("#authForm");
+  form.dataset.invited = String(state.pendingInvitedIdentity);
+  for (const input of [$("#authName"), $("#authTeam")]) {
+    input.readOnly = state.pendingInvitedIdentity;
+    if (state.pendingInvitedIdentity) {
+      input.value = "";
+      input.placeholder = "验证后同步";
+    } else {
+      input.removeAttribute("placeholder");
+    }
+  }
+  $("#authMessage").dataset.identitySignal = String(state.pendingInvitedIdentity);
+}
+
 function openAuth(pendingVoteId = "") {
   if (pendingVoteId) state.pendingVoteId = pendingVoteId;
   const pendingGame = state.gameById.get(pendingVoteId);
@@ -2230,6 +2256,7 @@ function openAuth(pendingVoteId = "") {
     ? `验证成功后将返回《${pendingGame.title}》的可能性核心提取仪式。`
     : "浏览无需登录。验证一次后，即可在投票截止前随时修改选票。";
   const profile = readProfile();
+  setInvitedIdentityMode(false);
   $("#authName").value ||= profile.name || "";
   $("#authTeam").value ||= profile.team || "";
   $("#authEmail").value ||= profile.email || "";
@@ -2256,7 +2283,7 @@ function startCodeCountdown(seconds) {
 }
 
 async function sendCode() {
-  const identity = validateProfile();
+  const identity = codeRequestIdentity();
   if (!identity) return;
   const button = $("#sendCodeButton");
   button.disabled = true;
@@ -2268,12 +2295,14 @@ async function sendCode() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(identity)
     });
+    setInvitedIdentityMode(result.invitedIdentityDetected);
     if (result.devCode) {
       $("#authCode").value = result.devCode;
-      setMessage($("#authMessage"), "本地调试验证码已自动填入。" );
+      setMessage($("#authMessage"), result.invitedIdentityDetected ? `${result.message} 本地验证码已自动填入。` : "本地调试验证码已自动填入。" );
     } else {
-      setMessage($("#authMessage"), "验证码已发送，请检查邮箱。" );
+      setMessage($("#authMessage"), result.message || "验证码已发送，请检查邮箱。" );
     }
+    $("#authMessage").dataset.identitySignal = String(Boolean(result.invitedIdentityDetected));
     startCodeCountdown(60);
     $("#authCode").focus();
   } catch (error) {
@@ -2286,7 +2315,7 @@ async function sendCode() {
 
 async function verifyAuth(event) {
   event.preventDefault();
-  const identity = validateProfile();
+  const identity = state.pendingInvitedIdentity ? codeRequestIdentity() : validateProfile();
   const code = $("#authCode").value.trim();
   if (!identity) return;
   if (!/^\d{6}$/.test(code)) return setMessage($("#authMessage"), "请输入 6 位数字验证码。", true);
@@ -2301,13 +2330,14 @@ async function verifyAuth(event) {
     });
     state.session = { authenticated: true, identity: result.identity, selfBlockedGameIds: result.selfBlockedGameIds || [] };
     state.ballot = result.ballot || { gameIds: [], version: 0 };
-    saveProfile(identity);
+    saveProfile(result.identity);
     closeDialog($("#authDialog"));
     $("#authCode").value = "";
     updateAccountUI();
     renderBallot();
     updateDetailVoteButton();
-    showToast("登录成功，之后可以直接修改投票。" );
+    showToast(state.pendingInvitedIdentity ? "受邀身份已同步，可以继续管理作品和投票。" : "登录成功，之后可以直接修改投票。" );
+    setInvitedIdentityMode(false);
     const pending = state.pendingVoteId;
     const shouldOpenBallot = state.pendingBallotOpen;
     state.pendingVoteId = "";
@@ -3630,6 +3660,9 @@ function bindUI() {
   $("#closeAuth").addEventListener("click", () => closeDialog($("#authDialog")));
   $("#authForm").addEventListener("submit", verifyAuth);
   $("#sendCodeButton").addEventListener("click", sendCode);
+  $("#authEmail").addEventListener("input", () => {
+    if (state.pendingInvitedIdentity) setInvitedIdentityMode(false);
+  });
   $("#closeBallot").addEventListener("click", closeBallotDialog);
   $("#logoutButton").addEventListener("click", logout);
   $("#clearExploration").addEventListener("click", clearExploration);

@@ -103,14 +103,14 @@ class ByteLimitTransform extends Transform {
     this.limit = limit;
     this.message = message;
     this.bytes = 0;
+    this.exceeded = false;
   }
 
   _transform(chunk, encoding, callback) {
     this.bytes += chunk.length;
     if (this.bytes > this.limit) {
-      const error = new Error(this.message);
-      error.status = 413;
-      callback(error);
+      this.exceeded = true;
+      callback();
       return;
     }
     callback(null, chunk);
@@ -801,13 +801,19 @@ function escapeHtml(value) {
 
 async function handleRequestCode(req, res) {
   const body = await readJson(req);
-  const name = cleanText(body.name, 30);
-  const team = cleanText(body.team, 50);
+  const submittedName = cleanText(body.name, 30);
+  const submittedTeam = cleanText(body.team, 50);
   const email = normalizeEmail(body.email);
-  if (!name || !team || !isValidEmail(email)) {
+  if (!isValidEmail(email)) {
     return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写姓名、队伍和有效邮箱。" });
   }
   const store = await ensureStore();
+  const invitedIdentity = membershipIdentity(store, email);
+  const name = invitedIdentity?.name || submittedName;
+  const team = invitedIdentity?.team || submittedTeam;
+  if (!name || !team) {
+    return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写姓名、队伍和有效邮箱。" });
+  }
   const previous = store.verificationCodes[email];
   const now = Date.now();
   const sourceIp = clientIp(req);
@@ -838,12 +844,23 @@ async function handleRequestCode(req, res) {
       attempts: 0,
       requestCount,
       windowStartedAt,
-      ip: sourceIp
+      ip: sourceIp,
+      resolvedName: name,
+      resolvedTeam: team,
+      identitySource: invitedIdentity ? "team_membership" : "submitted",
+      invitedGameId: invitedIdentity?.gameId || "",
+      invitedMemberId: invitedIdentity?.memberId || ""
     };
   });
   try {
     const delivery = await deliverCode({ email, name, code });
-    return json(res, 200, { ok: true, message: "验证码已发送，请检查邮箱。", expiresIn: Math.round(OTP_TTL_MS / 1000), ...delivery });
+    return json(res, 200, {
+      ok: true,
+      message: invitedIdentity ? "检测到受邀制作人员身份，验证后将同步队伍资料。" : "验证码已发送，请检查邮箱。",
+      invitedIdentityDetected: Boolean(invitedIdentity),
+      expiresIn: Math.round(OTP_TTL_MS / 1000),
+      ...delivery
+    });
   } catch (error) {
     await mutateStore((current) => {
       if (current.verificationCodes[email]?.codeHash === hashCode(email, code)) delete current.verificationCodes[email];
@@ -861,7 +878,16 @@ function verifyCode(store, { name, team, email, code }) {
     error.code = "CODE_EXPIRED";
     throw error;
   }
-  if (record.identityKey !== identityKey(name, team, email)) {
+  const usesMembershipIdentity = record.identitySource === "team_membership";
+  const resolvedName = usesMembershipIdentity ? cleanText(record.resolvedName, 40) : cleanText(name, 30);
+  const resolvedTeam = usesMembershipIdentity ? cleanText(record.resolvedTeam, 60) : cleanText(team, 50);
+  if (!resolvedName || !resolvedTeam) {
+    const error = new Error("请完整填写身份信息。");
+    error.status = 400;
+    error.code = "IDENTITY_REQUIRED";
+    throw error;
+  }
+  if (record.identityKey !== identityKey(resolvedName, resolvedTeam, email)) {
     const error = new Error("身份信息已改变，请重新发送验证码。");
     error.status = 400;
     error.code = "IDENTITY_CHANGED";
@@ -875,7 +901,7 @@ function verifyCode(store, { name, team, email, code }) {
     error.code = "CODE_INVALID";
     throw error;
   }
-  return record;
+  return { ...record, resolvedName, resolvedTeam, usesMembershipIdentity };
 }
 
 function ballotPayload(ballot) {
@@ -890,28 +916,133 @@ function addAudit(store, event) {
   store.audit.push({ id: randomId(), createdAt: new Date().toISOString(), ...event });
 }
 
+function membershipIdentity(store, email) {
+  const assigned = participantGame(store, email);
+  if (!assigned || assigned.role !== "member" || !assigned.member?.active) return null;
+  const creator = normalizeCreators(assigned.game.creators).find((item) => item.id === assigned.member.creatorId);
+  const name = cleanText(creator?.name, 40);
+  const team = cleanText(assigned.game.team, 60);
+  if (!name || !team) return null;
+  return {
+    email: normalizeEmail(email),
+    name,
+    team,
+    personKey: personKey(name, team),
+    gameId: assigned.game.id,
+    memberId: assigned.member.id
+  };
+}
+
+function synchronizeMembershipIdentity(store, identity, actor = {}) {
+  if (!identity?.email || !identity.name || !identity.team) return { ballot: null, invalidated: false, identityChanged: false };
+  const email = normalizeEmail(identity.email);
+  const now = new Date().toISOString();
+  const nextPersonKey = personKey(identity.name, identity.team);
+  const ballot = store.ballots.find((item) => normalizeEmail(item.email) === email) || null;
+  const beforeIdentity = ballot
+    ? { name: ballot.name, team: ballot.team, personKey: ballot.personKey }
+    : Object.values(store.sessions).find((session) => normalizeEmail(session.email) === email)
+      ? (() => {
+          const session = Object.values(store.sessions).find((item) => normalizeEmail(item.email) === email);
+          return { name: session.name, team: session.team, personKey: session.personKey };
+        })()
+      : null;
+  const ballotBefore = ballot ? [...(ballot.gameIds || [])] : [];
+  const invalidated = Boolean(ballot && identity.gameId && ballotBefore.includes(identity.gameId));
+  const identityChanged = Boolean(beforeIdentity && (
+    beforeIdentity.name !== identity.name
+    || beforeIdentity.team !== identity.team
+    || beforeIdentity.personKey !== nextPersonKey
+  ));
+
+  if (ballot) {
+    if (invalidated) ballot.gameIds = ballotBefore.filter((id) => id !== identity.gameId);
+    ballot.name = identity.name;
+    ballot.team = identity.team;
+    ballot.personKey = nextPersonKey;
+    if (invalidated || identityChanged) {
+      ballot.version = Number(ballot.version || 1) + 1;
+      ballot.updatedAt = now;
+    }
+  }
+
+  for (const session of Object.values(store.sessions)) {
+    if (normalizeEmail(session.email) !== email) continue;
+    session.name = identity.name;
+    session.team = identity.team;
+    session.personKey = nextPersonKey;
+  }
+
+  const pendingCode = store.verificationCodes?.[email];
+  if (pendingCode) {
+    pendingCode.identityKey = identityKey(identity.name, identity.team, email);
+    pendingCode.personKey = nextPersonKey;
+    pendingCode.resolvedName = identity.name;
+    pendingCode.resolvedTeam = identity.team;
+    pendingCode.identitySource = "team_membership";
+    pendingCode.invitedGameId = identity.gameId;
+    pendingCode.invitedMemberId = identity.memberId;
+  }
+
+  if (invalidated) {
+    addAudit(store, {
+      action: "ballot_invalidated_by_team_membership",
+      actorType: "system",
+      actorId: "system",
+      actorEmail: normalizeEmail(actor.email),
+      gameId: identity.gameId,
+      memberId: identity.memberId,
+      memberEmail: email,
+      voterId: ballot.id,
+      voterEmail: email,
+      before: ballotBefore,
+      after: [...ballot.gameIds]
+    });
+  }
+
+  if (identityChanged) {
+    addAudit(store, {
+      action: "participant_identity_synchronized_by_team_membership",
+      actorType: actor.type || "system",
+      actorId: actor.id || "system",
+      actorEmail: normalizeEmail(actor.email),
+      gameId: identity.gameId,
+      memberId: identity.memberId,
+      memberEmail: email,
+      before: beforeIdentity,
+      after: { name: identity.name, team: identity.team, personKey: nextPersonKey }
+    });
+  }
+
+  return { ballot, invalidated, identityChanged };
+}
+
 async function handleAuthVerify(req, res) {
   const body = await readJson(req);
-  const name = cleanText(body.name, 30);
-  const team = cleanText(body.team, 50);
+  const submittedName = cleanText(body.name, 30);
+  const submittedTeam = cleanText(body.team, 50);
   const email = normalizeEmail(body.email);
   const code = cleanText(body.code, 6);
-  if (!name || !team || !isValidEmail(email) || !/^\d{6}$/.test(code)) {
+  if (!isValidEmail(email) || !/^\d{6}$/.test(code)) {
     return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请完整填写身份信息和 6 位验证码。" });
   }
   const token = crypto.randomBytes(32).toString("base64url");
   const result = await mutateStore((store) => {
-    verifyCode(store, { name, team, email, code });
+    const currentMembershipIdentity = membershipIdentity(store, email);
+    if (currentMembershipIdentity) synchronizeMembershipIdentity(store, currentMembershipIdentity);
+    const verification = verifyCode(store, { name: submittedName, team: submittedTeam, email, code });
+    const name = verification.resolvedName;
+    const team = verification.resolvedTeam;
     const key = personKey(name, team);
     const byEmail = store.ballots.find((ballot) => ballot.email === email);
     const byPerson = store.ballots.find((ballot) => ballot.personKey === key && ballot.email !== email);
-    if (byPerson) {
+    if (byPerson && !verification.usesMembershipIdentity) {
       const error = new Error("该姓名与队伍已经使用其他邮箱投票，请使用首次投票邮箱登录。");
       error.status = 409;
       error.code = "PERSON_ALREADY_VOTED";
       throw error;
     }
-    if (byEmail && byEmail.personKey !== key) {
+    if (byEmail && byEmail.personKey !== key && !verification.usesMembershipIdentity) {
       const error = new Error("该邮箱已绑定其他姓名或队伍。");
       error.status = 409;
       error.code = "EMAIL_ALREADY_USED";
@@ -1160,12 +1291,12 @@ async function handleBallot(req, res) {
 
 async function handleVote(req, res) {
   const body = await readJson(req);
-  const name = cleanText(body.name, 30);
-  const team = cleanText(body.team, 50);
+  const submittedName = cleanText(body.name, 30);
+  const submittedTeam = cleanText(body.team, 50);
   const email = normalizeEmail(body.email);
   const code = cleanText(body.code, 6);
   const gameIds = [...new Set(Array.isArray(body.gameIds) ? body.gameIds.map((id) => cleanText(id, 100)) : [])];
-  if (!name || !team || !isValidEmail(email) || !/^\d{6}$/.test(code)) {
+  if (!isValidEmail(email) || !/^\d{6}$/.test(code)) {
     return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请完整填写身份信息和 6 位验证码。" });
   }
   if (gameIds.length < 1 || gameIds.length > 3) {
@@ -1194,33 +1325,15 @@ async function handleVote(req, res) {
         error.code = "SELF_VOTE";
         throw error;
       }
-      const record = store.verificationCodes[email];
-      if (!record || Date.now() > Number(record.expiresAt || 0)) {
-        delete store.verificationCodes[email];
-        const error = new Error("验证码已失效，请重新发送。");
-        error.status = 400;
-        error.code = "CODE_EXPIRED";
-        throw error;
-      }
-      if (record.identityKey !== identityKey(name, team, email)) {
-        const error = new Error("身份信息已改变，请重新发送验证码。");
-        error.status = 400;
-        error.code = "IDENTITY_CHANGED";
-        throw error;
-      }
-      if (!safeEqual(record.codeHash, hashCode(email, code))) {
-        record.attempts = Number(record.attempts || 0) + 1;
-        if (record.attempts >= 5) delete store.verificationCodes[email];
-        const error = new Error(record.attempts >= 5 ? "验证码错误次数过多，请重新发送。" : "验证码不正确。" );
-        error.status = 400;
-        error.code = "CODE_INVALID";
-        throw error;
-      }
-
+      const currentMembershipIdentity = membershipIdentity(store, email);
+      if (currentMembershipIdentity) synchronizeMembershipIdentity(store, currentMembershipIdentity);
+      const record = verifyCode(store, { name: submittedName, team: submittedTeam, email, code });
+      const name = record.resolvedName;
+      const team = record.resolvedTeam;
       const key = personKey(name, team);
       const byEmail = store.ballots.find((ballot) => ballot.email === email);
       const byPerson = store.ballots.find((ballot) => ballot.personKey === key && ballot.email !== email);
-      if (byPerson) {
+      if (byPerson && !record.usesMembershipIdentity) {
         const error = new Error("该姓名与队伍已经提交过选票。如需修改，请使用首次投票邮箱。" );
         error.status = 409;
         error.code = "PERSON_ALREADY_VOTED";
@@ -1228,7 +1341,7 @@ async function handleVote(req, res) {
       }
       const nowIso = new Date().toISOString();
       if (byEmail) {
-        if (byEmail.personKey !== key) {
+        if (byEmail.personKey !== key && !record.usesMembershipIdentity) {
           const error = new Error("该邮箱已绑定其他姓名或队伍。" );
           error.status = 409;
           error.code = "EMAIL_ALREADY_USED";
@@ -1352,14 +1465,19 @@ async function parseGameMultipart(req) {
           : isVideo
             ? `视频不能超过 ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)}MB。`
             : `作品文件不能超过 ${Math.round(MAX_GAME_FILE_BYTES / 1024 / 1024)}MB。`;
-      const task = pipeline(stream, new ByteLimitTransform(limit, limitMessage), fs.createWriteStream(target)).then(() => {
-        if (stream.truncated) {
-          const error = new Error(limitMessage);
-          error.status = 413;
-          throw error;
-        }
-        files[name] = { url: `/uploads/${filename}`, target, mimeType: info.mimeType, originalName: info.filename, size, sha256: digest.digest("hex") };
-      });
+      const limiter = new ByteLimitTransform(limit, limitMessage);
+      const task = pipeline(stream, limiter, fs.createWriteStream(target))
+        .then(() => {
+          if (limiter.exceeded || stream.truncated) {
+            const error = new Error(limitMessage);
+            error.status = 413;
+            throw error;
+          }
+          files[name] = { url: `/uploads/${filename}`, target, mimeType: info.mimeType, originalName: info.filename, size, sha256: digest.digest("hex") };
+        })
+        .catch((error) => {
+          parseError ||= error;
+        });
       tasks.push(task);
     });
 
@@ -1748,6 +1866,21 @@ async function handleParticipantUpdateGame(req, res, id) {
         after,
         changes
       });
+      if (cleanText(existing.team, 60) !== cleanText(updated.team, 60) && cleanText(updated.team, 60)) {
+        const creators = normalizeCreators(updated.creators);
+        for (const member of normalizeTeamMembers(updated.teamMembers).filter((item) => item.active)) {
+          const creator = creators.find((item) => item.id === member.creatorId);
+          if (!creator?.name) continue;
+          synchronizeMembershipIdentity(store, {
+            email: member.email,
+            name: creator.name,
+            team: cleanText(updated.team, 60),
+            personKey: personKey(creator.name, updated.team),
+            gameId: updated.id,
+            memberId: member.id
+          }, { type: "participant", id: record.session.id, email: record.session.email });
+        }
+      }
       return { game: updated, access };
     });
     const store = await ensureStore();
@@ -1925,13 +2058,23 @@ async function handleParticipantAddMember(req, res, id) {
     const creator = { id: existingMember?.creatorId || randomId(), name, role, contribution, avatarUrl: "", order: normalizeCreators(game.creators).length };
     const firstLoginAt = firstEmailVerificationAt(store, email);
     game.creators = [...normalizeCreators(game.creators).filter((item) => item.id !== creator.id), creator];
+    let storedMember;
     if (existingMember) {
-      const stored = game.teamMembers.find((member) => member.id === existingMember.id);
-      Object.assign(stored, { active: true, removedAt: "", creatorId: creator.id, addedAt: new Date().toISOString(), firstLoginAt: stored.firstLoginAt || firstLoginAt });
+      storedMember = game.teamMembers.find((member) => member.id === existingMember.id);
+      Object.assign(storedMember, { active: true, removedAt: "", creatorId: creator.id, addedAt: new Date().toISOString(), firstLoginAt: storedMember.firstLoginAt || firstLoginAt });
     } else {
-      game.teamMembers.push({ id: randomId(), email, creatorId: creator.id, active: true, addedAt: new Date().toISOString(), removedAt: "", firstLoginAt });
+      storedMember = { id: randomId(), email, creatorId: creator.id, active: true, addedAt: new Date().toISOString(), removedAt: "", firstLoginAt };
+      game.teamMembers.push(storedMember);
     }
     game.historicalTeamEmails = [...new Set([...(game.historicalTeamEmails || []), email])];
+    const identitySync = synchronizeMembershipIdentity(store, {
+      email,
+      name: creator.name,
+      team: cleanText(game.team, 60),
+      personKey: personKey(creator.name, game.team),
+      gameId: game.id,
+      memberId: storedMember.id
+    }, { type: "participant", id: record.session.id, email: record.session.email });
     game.updatedAt = new Date().toISOString();
     game.revision = Number(game.revision || 1) + 1;
     addAudit(store, {
@@ -1943,7 +2086,7 @@ async function handleParticipantAddMember(req, res, id) {
       memberEmail: email,
       after: { email, name, role, contribution, creatorId: creator.id }
     });
-    return { game, access, ownerName: record.session.name };
+    return { game, access, ownerName: record.session.name, voteInvalidated: identitySync.invalidated };
   });
   const store = await ensureStore();
   const loginUrl = `${requestOrigin(req)}/submit`;
@@ -1952,7 +2095,14 @@ async function handleParticipantAddMember(req, res, id) {
   } catch (error) {
     await mutateStore((store) => addAudit(store, { action: "team_invitation_email_failed", actorType: "system", actorId: "system", gameId: id, memberEmail: email, reason: cleanText(error.message, 300) }));
   }
-  return json(res, 201, { ok: true, game: participantGamePayload(result.game, result.access, store.settings), message: "队友权限已立即生效，通知邮件已安排发送。" });
+  return json(res, 201, {
+    ok: true,
+    game: participantGamePayload(result.game, result.access, store.settings),
+    voteInvalidated: result.voteInvalidated,
+    message: result.voteInvalidated
+      ? "队友权限已生效，该成员投给本作品的可能性核心已自动归还。"
+      : "队友权限已立即生效，通知邮件已安排发送。"
+  });
 }
 
 async function handleParticipantRemoveMember(req, res, id, memberId) {
@@ -2070,6 +2220,16 @@ async function handleParticipantProfile(req, res, id, memberId) {
         before: previous,
         after: next
       });
+      if (targetMember) {
+        synchronizeMembershipIdentity(store, {
+          email: targetMember.email,
+          name: next.name,
+          team: cleanText(game.team, 60),
+          personKey: personKey(next.name, game.team),
+          gameId: game.id,
+          memberId: targetMember.id
+        }, { type: "participant", id: record.session.id, email: record.session.email });
+      }
       return { game, access };
     });
     const store = await ensureStore();

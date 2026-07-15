@@ -256,6 +256,7 @@ assert.equal(result.response.status, 200);
 secondGame = result.body.game;
 result = await request(`/api/participant/games/${secondGame.id}/submit`, { cookie: memberCookie, method: "POST" });
 assert.equal(result.response.status, 200);
+secondGame = result.body.game;
 
 for (const [id, operationId] of [[game.id, "final-vote-one"], [secondGame.id, "final-vote-two"]]) {
   result = await request("/api/ballot", {
@@ -267,6 +268,127 @@ for (const [id, operationId] of [[game.id, "final-vote-one"], [secondGame.id, "f
   assert.equal(result.response.status, 200);
 }
 
+result = await request(`/api/participant/games/${secondGame.id}/members`, {
+  cookie: memberCookie,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "星潮", email: voterEmail, role: "测试" })
+});
+assert.equal(result.response.status, 201);
+assert.equal(result.body.voteInvalidated, true);
+secondGame = result.body.game;
+let invitedVoterMember = secondGame.teamMembers.find((item) => item.email === voterEmail && item.active);
+assert.ok(invitedVoterMember);
+
+result = await request("/api/ballot", { cookie: voterCookie });
+assert.deepEqual(result.body.ballot.gameIds, [game.id]);
+result = await request("/api/admin/dashboard", { admin: true });
+let synchronizedBallot = result.body.ballots.find((item) => item.emailSearch === voterEmail);
+assert.equal(synchronizedBallot.name, "星潮");
+assert.equal(synchronizedBallot.team, "潮汐小组");
+
+result = await request("/api/session", { cookie: voterCookie });
+assert.equal(result.body.identity.name, "星潮");
+assert.equal(result.body.identity.team, "潮汐小组");
+assert.ok(result.body.selfBlockedGameIds.includes(secondGame.id));
+
+result = await request("/api/ballot", {
+  cookie: voterCookie,
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ addGameId: secondGame.id, operationId: "blocked-after-invite" })
+});
+assert.equal(result.response.status, 409);
+assert.equal(result.body.error, "SELF_VOTE");
+
+result = await request(`/api/admin/audit?gameId=${encodeURIComponent(secondGame.id)}&limit=500`, { admin: true });
+assert.ok(result.body.audit.some((item) => item.action === "ballot_invalidated_by_team_membership"));
+assert.ok(result.body.audit.some((item) => item.action === "participant_identity_synchronized_by_team_membership"));
+
+const synchronizedProfile = new FormData();
+synchronizedProfile.set("name", "星潮改");
+synchronizedProfile.set("role", "测试");
+synchronizedProfile.set("contribution", "维护测试流程");
+result = await request(`/api/participant/games/${secondGame.id}/members/${invitedVoterMember.id}`, {
+  cookie: voterCookie,
+  method: "PUT",
+  body: synchronizedProfile
+});
+assert.equal(result.response.status, 200);
+secondGame = result.body.game;
+
+result = await request("/api/session", { cookie: voterCookie });
+assert.equal(result.body.identity.name, "星潮改");
+assert.equal(result.body.identity.team, "潮汐小组");
+result = await request("/api/ballot", { cookie: voterCookie });
+assert.deepEqual(result.body.ballot.gameIds, [game.id]);
+result = await request("/api/admin/dashboard", { admin: true });
+synchronizedBallot = result.body.ballots.find((item) => item.emailSearch === voterEmail);
+assert.equal(synchronizedBallot.name, "星潮改");
+
+const renamedTeamForm = workForm(secondGame, { team: "潮汐新组" });
+result = await request(`/api/participant/games/${secondGame.id}`, {
+  cookie: memberCookie,
+  method: "PUT",
+  body: renamedTeamForm
+});
+assert.equal(result.response.status, 200);
+secondGame = result.body.game;
+result = await request("/api/session", { cookie: voterCookie });
+assert.equal(result.body.identity.name, "星潮改");
+assert.equal(result.body.identity.team, "潮汐新组");
+result = await request("/api/ballot", { cookie: voterCookie });
+assert.deepEqual(result.body.ballot.gameIds, [game.id]);
+result = await request("/api/admin/dashboard", { admin: true });
+synchronizedBallot = result.body.ballots.find((item) => item.emailSearch === voterEmail);
+assert.equal(synchronizedBallot.team, "潮汐新组");
+
+const invitedLoginEmail = "invited-login-flow@example.com";
+result = await request(`/api/participant/games/${secondGame.id}/members`, {
+  cookie: memberCookie,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: "岚序", email: invitedLoginEmail, role: "声音" })
+});
+assert.equal(result.response.status, 201);
+secondGame = result.body.game;
+
+result = await request("/api/verification/request", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ email: invitedLoginEmail })
+});
+assert.equal(result.response.status, 200);
+assert.equal(result.body.invitedIdentityDetected, true);
+assert.equal(Object.hasOwn(result.body, "name"), false);
+assert.equal(Object.hasOwn(result.body, "team"), false);
+const invitedCode = result.body.devCode;
+
+result = await request("/api/auth/verify", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ email: invitedLoginEmail, code: invitedCode })
+});
+assert.equal(result.response.status, 200);
+assert.deepEqual(result.body.identity, { name: "岚序", team: "潮汐新组", email: invitedLoginEmail });
+
+const closingVoterCookie = await login("远光", "观测访客", "closing-voter-flow@example.com");
+result = await request("/api/ballot", {
+  cookie: closingVoterCookie,
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ addGameId: secondGame.id, operationId: "closing-vote-two" })
+});
+assert.equal(result.response.status, 200);
+
+result = await request("/api/admin/dashboard", { admin: true });
+result = await request("/api/admin/settings", {
+  admin: true,
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ ...result.body.settings, endAt: new Date(Date.now() - 1000).toISOString() })
+});
+assert.equal(result.response.status, 200);
 result = await request("/api/admin/results/publish", { admin: true, method: "POST" });
 assert.equal(result.response.status, 200);
 result = await request("/api/admin/dashboard", { admin: true });

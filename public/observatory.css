@@ -1762,6 +1762,20 @@ canvas:focus-visible {
   color: var(--signal);
 }
 
+.form-message[data-identity-signal="true"] {
+  border-left: 2px solid var(--signal);
+  padding: 9px 12px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--signal) 8%, transparent);
+  line-height: 1.65;
+}
+
+#authForm[data-invited="true"] input[readonly] {
+  border-color: color-mix(in srgb, var(--signal) 55%, var(--line));
+  color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 5%, transparent);
+}
+
 .full-action {
   width: 100%;
 }

@@ -3,6 +3,7 @@ const state = {
   workspace: null,
   game: null,
   dirty: false,
+  pendingInvitedIdentity: false,
   confirmResolve: null,
   profileTarget: null
 };
@@ -225,16 +226,38 @@ async function sendCode() {
   const form = $("#authForm");
   const button = $("#sendCode");
   const body = { name: form.elements.name.value, team: form.elements.team.value, email: form.elements.email.value };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(body.email || "").trim())) {
+    setMessage($("#authMessage"), "请先填写有效邮箱。", true);
+    return;
+  }
   button.disabled = true;
   setMessage($("#authMessage"), "正在发送验证码...");
   try {
     const result = await api("/api/verification/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    setMessage($("#authMessage"), result.devCode ? `本地验证码：${result.devCode}` : result.message);
+    setSubmissionInvitedIdentity(result.invitedIdentityDetected);
+    setMessage($("#authMessage"), result.devCode ? `${result.message} 本地验证码：${result.devCode}` : result.message);
+    $("#authMessage").dataset.identitySignal = String(Boolean(result.invitedIdentityDetected));
   } catch (error) {
     setMessage($("#authMessage"), error.message, true);
   } finally {
     button.disabled = false;
   }
+}
+
+function setSubmissionInvitedIdentity(active) {
+  state.pendingInvitedIdentity = Boolean(active);
+  const form = $("#authForm");
+  form.dataset.invited = String(state.pendingInvitedIdentity);
+  for (const input of [form.elements.name, form.elements.team]) {
+    input.readOnly = state.pendingInvitedIdentity;
+    if (state.pendingInvitedIdentity) {
+      input.value = "";
+      input.placeholder = "验证后同步";
+    } else {
+      input.removeAttribute("placeholder");
+    }
+  }
+  $("#authMessage").dataset.identitySignal = String(state.pendingInvitedIdentity);
 }
 
 async function verifyLogin(event) {
@@ -246,6 +269,7 @@ async function verifyLogin(event) {
   try {
     const result = await api("/api/auth/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
     state.session = result;
+    setSubmissionInvitedIdentity(false);
     await loadSession();
     await loadWorkspace();
   } catch (error) {
@@ -457,6 +481,9 @@ async function logout() {
 
 function bindEvents() {
   $("#sendCode").addEventListener("click", sendCode);
+  $("#authForm").elements.email.addEventListener("input", () => {
+    if (state.pendingInvitedIdentity) setSubmissionInvitedIdentity(false);
+  });
   $("#authForm").addEventListener("submit", verifyLogin);
   $("#createDraftForm").addEventListener("submit", createDraft);
   $("#gameForm").addEventListener("submit", saveGameDetails);

@@ -173,6 +173,8 @@ input[type="file"] { border: 1px dashed var(--line-strong); padding: 12px; }
 .signal-button.danger { border-color: color-mix(in srgb, var(--danger) 70%, var(--line)); color: var(--danger); background: transparent; }
 .form-message { min-height: 1.4em; margin: 0; color: var(--muted); font-size: .76rem; }
 .form-message[data-error="true"] { color: var(--danger); }
+.form-message[data-identity-signal="true"] { border-left: 2px solid var(--signal); padding: 9px 12px; color: var(--ink); background: color-mix(in srgb, var(--signal) 8%, transparent); line-height: 1.65; }
+#authForm[data-invited="true"] input[readonly] { border-color: color-mix(in srgb, var(--signal) 55%, var(--line)); color: var(--signal); background: color-mix(in srgb, var(--signal) 5%, transparent); }
 
 .submission-loading { min-height: 60dvh; place-content: center; justify-items: center; gap: 16px; }
 .submission-loading:not([hidden]) { display: grid; }
