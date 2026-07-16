@@ -8,7 +8,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>溯造 MiniGame | 轨道控制台</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/styles.css?v=20260715b" />
+    <link rel="stylesheet" href="/styles.css?v=20260716echo1" />
   </head>
   <body class="admin-body">
     <main class="admin-login" id="adminLogin">
@@ -39,6 +39,7 @@
           <a href="#gamesAdmin">作品</a>
           <a href="#settingsAdmin">活动</a>
           <a href="#ballotsAdmin">选票</a>
+          <a href="#commentsAdmin">回声</a>
           <a href="#resultsAdmin">点亮</a>
           <a href="#auditAdmin">审计</a>
         </nav>
@@ -99,6 +100,7 @@
               <div class="editor-switches">
                 <label><input name="published" type="checkbox" checked /> 对外发布</label>
                 <label><input name="featured" type="checkbox" /> 设为主推</label>
+                <label><input name="isOfficial" type="checkbox" /> 官方作品（不参与投票与评奖）</label>
               </div>
               <div class="editor-actions">
                 <button class="button button-solid" id="saveGame" type="submit">保存作品</button>
@@ -138,6 +140,21 @@
           <div class="ballot-list" id="ballotList"></div>
         </section>
 
+        <section class="admin-block" id="commentsAdmin">
+          <div class="admin-block-head">
+            <div><p class="admin-kicker">ECHO MODERATION</p><h2>观测回声管理</h2><p>管理评论开放状态、建设性反馈标签、违规内容与禁言。所有操作必须填写原因并永久进入审计。</p></div>
+            <div class="admin-block-actions"><button class="button button-outline" id="toggleGlobalComments" type="button">暂停全站评论</button><button class="button button-outline" id="refreshComments" type="button">刷新回声</button></div>
+          </div>
+          <div class="comment-admin-layout">
+            <section class="comment-admin-controls">
+              <div class="comment-admin-subsection"><h3>作品讨论状态</h3><div id="commentGameSettings"></div></div>
+              <form class="comment-tag-form" id="commentTagForm"><h3>新增统一标签</h3><label class="admin-field"><span>标签分组</span><input name="group" maxlength="20" placeholder="玩法 / 视听 / 操作" required /></label><label class="admin-field"><span>标签文字</span><input name="label" maxlength="8" required /></label><button class="button button-outline" type="submit">加入词表</button></form>
+              <div class="comment-admin-subsection"><h3>统一标签词表</h3><div id="commentTagList"></div></div>
+            </section>
+            <section class="comment-admin-stream"><div class="comment-admin-filter"><label class="admin-search"><span>筛选回声</span><input id="commentAdminSearch" type="search" placeholder="作品、姓名、邮箱或内容" /></label></div><div id="commentAdminList"></div></section>
+          </div>
+        </section>
+
         <section class="admin-block results-control" id="resultsAdmin">
           <div class="admin-block-head"><div><p class="admin-kicker">COSMIC IGNITION</p><h2>宇宙点亮</h2><p>玩家之声固定为两项同等级奖。前五名构成星座，第五名同票时星座席位自动扩展。</p></div></div>
           <div id="resultControl"></div>
@@ -158,6 +175,6 @@
     </div>
 
     <div class="toast" id="adminToast" role="status" hidden></div>
-    <script src="/admin.js?v=20260715b" defer></script>
+    <script src="/admin.js?v=20260716echo1" defer></script>
   </body>
 </html>

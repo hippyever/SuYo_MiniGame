@@ -115,7 +115,22 @@ const state = {
   resultRevealStart: 0,
   resultRevealProgress: 0,
   resultEntered: false,
-  resultReturnTarget: ""
+  resultReturnTarget: "",
+  comments: [],
+  commentNextOffset: null,
+  commentLoading: false,
+  commentAvailability: null,
+  commentTags: [],
+  selectedCommentTags: new Set(),
+  commentFiles: [],
+  replyFiles: [],
+  replyTargetId: "",
+  commentObserver: null,
+  commentProfile: null,
+  notifications: [],
+  notificationPreferences: null,
+  participantCommentGames: [],
+  pendingCommentDeleteId: ""
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -1741,6 +1756,11 @@ function updateDetailVoteButton() {
   const button = $("#detailVote");
   const game = state.gameById.get(state.detailId);
   if (!game) return;
+  if (game.isOfficial) {
+    button.disabled = true;
+    button.textContent = "官方作品不参与投票与评奖";
+    return;
+  }
   if (state.site.votingState !== "open") {
     button.disabled = true;
     button.textContent = state.site.votingState === "upcoming" ? "投票尚未开始" : "投票已结束";
@@ -1935,6 +1955,387 @@ function installDetailScrollCue() {
   }
 }
 
+function echoAvatar(author, className = "") {
+  const seed = author?.avatarSeed || { hue: 80, phase: 50 };
+  const name = author?.name || "观测者";
+  const content = author?.avatarUrl
+    ? `<img src="${escapeHTML(author.avatarUrl)}" alt="${escapeHTML(name)}的头像" loading="lazy" />`
+    : `<span>${escapeHTML([...name][0] || "观")}</span>`;
+  return `<span class="echo-avatar ${className}" style="--echo-hue:${Number(seed.hue || 80)};--echo-phase:${Number(seed.phase || 50)}%">${content}</span>`;
+}
+
+function echoTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "时间未知";
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "刚刚";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+function commentStatusMarkup(comment) {
+  if (comment.status === "hidden-placeholder") return `<p class="echo-placeholder">该信号暂不可见</p>`;
+  if (comment.status === "deleted-placeholder") return `<p class="echo-placeholder">这段回声已由发出者收回</p>`;
+  return "";
+}
+
+function renderEchoCard(comment, { reply = false, preview = false } = {}) {
+  const placeholder = commentStatusMarkup(comment);
+  const developer = comment.author?.developer ? `<span class="echo-developer-mark">开发者</span>` : "";
+  const replyTarget = comment.replyToName ? `<span class="echo-reply-target">回复 @${escapeHTML(comment.replyToName)}</span>` : "";
+  const tags = (comment.tags || []).length ? `<div class="echo-card-tags">${comment.tags.map((tag) => `<span># ${escapeHTML(tag.label)}</span>`).join("")}</div>` : "";
+  const images = (comment.images || []).length ? `<div class="echo-card-images">${comment.images.map((image) => `<button type="button" data-echo-image="${escapeHTML(image.url)}" aria-label="查看评论原图"><img src="${escapeHTML(image.thumbnailUrl || image.url)}" alt="评论图片" loading="lazy" /></button>`).join("")}</div>` : "";
+  const body = placeholder || `${replyTarget}<div class="echo-card-body">${escapeHTML(comment.body || "")}</div>${images}${tags}`;
+  const likeDisabled = comment.mine || comment.status !== "active";
+  const actions = preview ? "" : `<div class="echo-card-actions">
+    <button type="button" data-comment-action="like" data-comment-id="${escapeHTML(comment.id)}" aria-pressed="${comment.likedByMe}" ${likeDisabled ? "disabled" : ""}>${comment.likedByMe ? "已共鸣" : "共鸣"} ${comment.likeCount || ""}</button>
+    <button type="button" data-comment-action="reply" data-comment-id="${escapeHTML(comment.id)}" ${state.commentAvailability?.writable && comment.status === "active" ? "" : "disabled"}>回应信号</button>
+    ${comment.mine && comment.status === "active" ? `<button type="button" data-comment-action="delete" data-comment-id="${escapeHTML(comment.id)}">收回</button>` : ""}
+  </div>`;
+  const replies = !reply && !preview && (comment.replies || []).length ? `<div class="echo-replies">${comment.replies.map((item) => renderEchoCard(item, { reply: true })).join("")}</div>` : "";
+  const expand = !reply && !preview && Number(comment.replyCount || 0) > (comment.replies || []).length ? `<button class="echo-expand-replies" type="button" data-comment-action="expand" data-comment-id="${escapeHTML(comment.id)}">展开其余 ${comment.replyCount - (comment.replies || []).length} 条回应</button>` : "";
+  return `<article class="echo-card${reply ? " echo-reply" : ""}" data-comment-card="${escapeHTML(comment.id)}">
+    ${echoAvatar(comment.author)}
+    <div class="echo-card-main">
+      <header class="echo-card-header"><strong>${escapeHTML(comment.author?.name || "观测者")}</strong>${developer}<time datetime="${escapeHTML(comment.createdAt)}">${echoTime(comment.createdAt)}</time></header>
+      ${body}${actions}${replies}${expand}
+    </div>
+  </article>`;
+}
+
+function renderCommentIdentity(profile = state.commentProfile) {
+  const target = $("#commentIdentity");
+  if (!target) return;
+  if (!state.session.authenticated || !profile) {
+    target.innerHTML = `<span class="echo-avatar" style="--echo-hue:80;--echo-phase:48%"><span>?</span></span>`;
+    return;
+  }
+  target.innerHTML = echoAvatar(profile);
+}
+
+function renderCommentTagPicker() {
+  const groups = new Map();
+  for (const tag of state.commentTags || []) {
+    if (!groups.has(tag.group)) groups.set(tag.group, []);
+    groups.get(tag.group).push(tag);
+  }
+  $("#commentTagPicker").innerHTML = [...groups.entries()].map(([group, tags]) => `<div class="echo-tag-group"><strong>${escapeHTML(group)}</strong>${tags.map((tag) => `<button class="echo-tag" type="button" data-comment-tag="${escapeHTML(tag.id)}" aria-pressed="${state.selectedCommentTags.has(tag.id)}">${escapeHTML(tag.label)}</button>`).join("")}</div>`).join("") + `<div class="echo-tag-group"><strong>自定义</strong><input class="echo-custom-tag" id="customCommentTag" maxlength="8" placeholder="最多 8 字" /></div>`;
+}
+
+function renderLocalImages(container, files, kind) {
+  container.innerHTML = files.map((file, index) => `<figure class="echo-local-image"><img src="${escapeHTML(file.preview)}" alt="待发送图片 ${index + 1}" /><button type="button" data-remove-local-image="${index}" data-local-kind="${kind}" aria-label="移除图片">×</button></figure>`).join("");
+  if (kind === "comment") $("#commentImageCount").textContent = `${files.length}/5`;
+}
+
+function setCommentFiles(fileList, kind) {
+  const key = kind === "reply" ? "replyFiles" : "commentFiles";
+  const current = state[key];
+  const incoming = [...fileList].filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type));
+  for (const file of incoming.slice(0, Math.max(0, 5 - current.length))) current.push({ file, preview: URL.createObjectURL(file), status: "ready" });
+  renderLocalImages(kind === "reply" ? $("#replyImagePreview") : $("#commentImagePreview"), current, kind);
+}
+
+function clearLocalFiles(kind) {
+  const key = kind === "reply" ? "replyFiles" : "commentFiles";
+  state[key].forEach((item) => URL.revokeObjectURL(item.preview));
+  state[key] = [];
+  renderLocalImages(kind === "reply" ? $("#replyImagePreview") : $("#commentImagePreview"), [], kind);
+}
+
+function updateCommentComposer() {
+  const form = $("#commentForm");
+  const readonly = $("#commentReadonly");
+  const available = state.commentAvailability || { writable: false, reason: "正在校准讨论空间" };
+  const isDeveloper = Boolean(state.commentViewerDeveloper);
+  if (!available.writable) {
+    form.hidden = true;
+    readonly.hidden = false;
+    readonly.textContent = available.reason || "讨论空间当前只读。";
+  } else if (!state.session.authenticated) {
+    form.hidden = true;
+    readonly.hidden = false;
+    readonly.innerHTML = `完成邮箱验证后即可发出回声。 <button class="plain-action" type="button" data-comment-login>登录并验证</button>`;
+  } else if (isDeveloper) {
+    form.hidden = true;
+    readonly.hidden = false;
+    readonly.textContent = "你以本作品开发者身份进入。可回应观测者的信号，但不发表一级评价。";
+  } else {
+    form.hidden = false;
+    readonly.hidden = true;
+  }
+  renderCommentIdentity();
+}
+
+function renderCommentList({ append = false } = {}) {
+  const list = $("#commentList");
+  const html = state.comments.map((comment) => renderEchoCard(comment)).join("");
+  list.innerHTML = html || `<div class="echo-preview-empty"><strong>频段仍然安静</strong><span>成为第一个留下观测回声的人。</span></div>`;
+  $("#commentSentinel").hidden = state.commentNextOffset === null;
+  if (!append) $("#commentScroller").scrollTop = 0;
+}
+
+async function loadCommentPreview(gameId) {
+  const list = $("#echoPreviewList");
+  list.innerHTML = `<div class="echo-preview-empty"><span>正在接收观测回声</span></div>`;
+  try {
+    const result = await fetchJSON(`/api/games/${encodeURIComponent(gameId)}/comments?limit=4&offset=0`);
+    $("#echoPreviewCount").textContent = `${result.total} 条信号`;
+    list.innerHTML = result.comments.length ? result.comments.map((comment) => renderEchoCard(comment, { preview: true })).join("") : `<div class="echo-preview-empty"><strong>尚未发现回声</strong><span>进入讨论，留下对这颗行星的第一份观测记录。</span></div>`;
+  } catch (error) {
+    list.innerHTML = `<div class="echo-preview-empty"><span>${escapeHTML(error.message)}</span></div>`;
+  }
+}
+
+async function loadComments({ reset = false } = {}) {
+  if (state.commentLoading || !state.detailId) return;
+  if (!reset && state.commentNextOffset === null) return;
+  state.commentLoading = true;
+  const offset = reset ? 0 : state.commentNextOffset || 0;
+  try {
+    const result = await fetchJSON(`/api/games/${encodeURIComponent(state.detailId)}/comments?limit=15&offset=${offset}`);
+    state.comments = reset ? result.comments : [...state.comments, ...result.comments];
+    state.commentNextOffset = result.nextOffset;
+    state.commentAvailability = result.availability;
+    state.commentTags = result.tags || [];
+    state.commentProfile = result.identity || state.commentProfile;
+    state.commentViewerDeveloper = Boolean(result.viewerDeveloper);
+    renderCommentTagPicker();
+    updateCommentComposer();
+    renderCommentList({ append: !reset });
+  } catch (error) {
+    $("#commentList").innerHTML = `<div class="echo-preview-empty"><strong>回声接收中断</strong><span>${escapeHTML(error.message)}</span></div>`;
+  } finally {
+    state.commentLoading = false;
+  }
+}
+
+async function openComments() {
+  const game = state.gameById.get(state.detailId);
+  if (!game) return;
+  $("#commentPanelSubtitle").textContent = `${game.title} / ${game.team}`;
+  state.comments = [];
+  state.commentNextOffset = 0;
+  const panel = $("#commentPanel");
+  panel.hidden = false;
+  document.body.classList.add("echo-open");
+  requestAnimationFrame(() => panel.classList.add("visible"));
+  await loadComments({ reset: true });
+  $("#closeComments").focus();
+}
+
+function closeComments() {
+  const panel = $("#commentPanel");
+  panel.classList.remove("visible");
+  document.body.classList.remove("echo-open");
+  setTimeout(() => { panel.hidden = true; }, state.reducedMotion ? 0 : 520);
+  $("#openComments")?.focus();
+}
+
+async function submitComment(event) {
+  event.preventDefault();
+  const message = $("#commentMessage");
+  const button = $("#submitComment");
+  const custom = cleanCommentTag($("#customCommentTag")?.value);
+  const tags = state.commentTags.filter((tag) => state.selectedCommentTags.has(tag.id)).map((tag) => ({ id: tag.id, label: tag.label }));
+  if (custom) tags.push({ label: custom });
+  if (tags.length > 5) { message.textContent = "每条回声最多选择 5 个观测标记。"; return; }
+  const data = new FormData();
+  data.set("body", $("#commentBody").value);
+  data.set("tags", JSON.stringify(tags));
+  state.commentFiles.forEach((item) => data.append("images", item.file));
+  button.disabled = true;
+  button.textContent = state.commentFiles.length ? "图像传输中" : "信号发送中";
+  message.textContent = "";
+  try {
+    await fetchJSON(`/api/games/${encodeURIComponent(state.detailId)}/comments`, { method: "POST", body: data });
+    $("#commentBody").value = "";
+    $("#commentLength").textContent = "0/2000";
+    state.selectedCommentTags.clear();
+    clearLocalFiles("comment");
+    message.textContent = "回声已进入观测频段。";
+    await loadComments({ reset: true });
+    loadCommentPreview(state.detailId);
+  } catch (error) {
+    message.textContent = `${error.message} 已选择的图片仍保留，可直接重试。`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "发出回声";
+  }
+}
+
+function cleanCommentTag(value) {
+  return [...String(value || "").trim()].slice(0, 8).join("");
+}
+
+function openReply(commentId) {
+  const find = (comments) => {
+    for (const comment of comments) {
+      if (comment.id === commentId) return comment;
+      const nested = find(comment.replies || []);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  const comment = find(state.comments);
+  if (!comment) return;
+  if (!state.session.authenticated) { openAuth(); return; }
+  state.replyTargetId = commentId;
+  $("#replyTarget").textContent = `回复 @${comment.author?.name || "观测者"}`;
+  $("#replyBody").value = "";
+  $("#replyLength").textContent = "0/1000";
+  $("#replyMessage").textContent = "";
+  clearLocalFiles("reply");
+  $("#replyDialog").showModal();
+  $("#replyBody").focus();
+}
+
+async function submitReply(event) {
+  event.preventDefault();
+  if (!state.replyTargetId) return;
+  const data = new FormData();
+  data.set("body", $("#replyBody").value);
+  state.replyFiles.forEach((item) => data.append("images", item.file));
+  const submit = $("#replyForm button[type='submit']");
+  submit.disabled = true;
+  $("#replyMessage").textContent = "";
+  try {
+    await fetchJSON(`/api/comments/${encodeURIComponent(state.replyTargetId)}/replies`, { method: "POST", body: data });
+    $("#replyDialog").close();
+    clearLocalFiles("reply");
+    await loadComments({ reset: true });
+    loadCommentPreview(state.detailId);
+  } catch (error) {
+    $("#replyMessage").textContent = `${error.message} 已选择的图片仍保留，可直接重试。`;
+  } finally { submit.disabled = false; }
+}
+
+async function expandReplies(id) {
+  try {
+    const result = await fetchJSON(`/api/comments/${encodeURIComponent(id)}/replies`);
+    const root = state.comments.find((item) => item.id === id);
+    if (root) root.replies = result.replies;
+    renderCommentList({ append: true });
+    $(`[data-comment-card="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
+  } catch (error) { showToast(error.message); }
+}
+
+async function toggleCommentLike(id, liked) {
+  try {
+    const result = await fetchJSON(`/api/comments/${encodeURIComponent(id)}/like`, { method: liked ? "DELETE" : "PUT" });
+    const visit = (comments) => comments.some((comment) => {
+      if (comment.id === id) { comment.likedByMe = result.liked; comment.likeCount = result.likeCount; return true; }
+      return visit(comment.replies || []);
+    });
+    visit(state.comments);
+    renderCommentList({ append: true });
+    refreshNotifications();
+  } catch (error) { if (error.code === "LOGIN_REQUIRED") openAuth(); else showToast(error.message); }
+}
+
+function requestCommentDelete(id) {
+  state.pendingCommentDeleteId = id;
+  $("#commentDeleteMessage").textContent = "";
+  openDialog($("#commentDeleteDialog"));
+}
+
+async function deleteComment() {
+  const id = state.pendingCommentDeleteId;
+  if (!id) return;
+  const button = $("#confirmCommentDelete");
+  button.disabled = true;
+  try {
+    await fetchJSON(`/api/comments/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.pendingCommentDeleteId = "";
+    closeDialog($("#commentDeleteDialog"));
+    await loadComments({ reset: true });
+    loadCommentPreview(state.detailId);
+  } catch (error) {
+    $("#commentDeleteMessage").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function refreshNotifications() {
+  const button = $("#notificationButton");
+  if (!state.session.authenticated) { button.hidden = true; return; }
+  button.hidden = false;
+  try {
+    const result = await fetchJSON("/api/comment-notifications");
+    state.notifications = result.notifications || [];
+    state.notificationPreferences = result.preferences;
+    state.participantCommentGames = result.participantGames || [];
+    const count = Number(result.unreadCount || 0);
+    [$("#notificationCount"), $("#panelNotificationCount")].forEach((node) => { node.textContent = String(count); node.hidden = count === 0; });
+  } catch { /* 会话刷新时再校准 */ }
+}
+
+function notificationMarkup(item) {
+  const actor = item.actors?.[0] || { name: "观测者", avatarSeed: { hue: 80, phase: 50 } };
+  const count = Number(item.actorCount || 1);
+  const copy = item.type === "like" ? `${count > 1 ? `${count} 人` : actor.name}赞了你的评论` : item.type === "game_comment" ? `${actor.name}在你的作品下留下了新评论` : `${actor.name}回复了你`;
+  return `<button class="echo-notification ${item.readAt ? "" : "unread"}" type="button" data-notification-comment="${escapeHTML(item.commentId)}" data-notification-root="${escapeHTML(item.rootId || item.commentId)}" data-notification-game="${escapeHTML(item.gameId)}">${echoAvatar(actor)}<span><strong>${escapeHTML(copy)}</strong><span>${echoTime(item.createdAt)}</span></span></button>`;
+}
+
+async function openNotifications() {
+  if (!state.session.authenticated) { openAuth(); return; }
+  await refreshNotifications();
+  $("#notificationList").innerHTML = state.notifications.length ? state.notifications.map(notificationMarkup).join("") : `<div class="echo-preview-empty"><strong>接收器保持安静</strong><span>新的回复与共鸣会在这里出现。</span></div>`;
+  const prefs = state.notificationPreferences || { replies: true, likes: true, gameComments: {} };
+  $("#notifyReplies").checked = prefs.replies !== false;
+  $("#notifyLikes").checked = prefs.likes !== false;
+  const ownGame = state.participantCommentGames[0];
+  $("#notifyGameCommentsLabel").hidden = !ownGame;
+  $("#notifyGameComments").dataset.gameId = ownGame?.id || "";
+  $("#notifyGameComments").checked = Boolean(ownGame && prefs.gameComments?.[ownGame.id]);
+  $("#notificationDialog").showModal();
+}
+
+async function saveNotificationPreferences() {
+  const gameId = $("#notifyGameComments").dataset.gameId;
+  const gameComments = { ...(state.notificationPreferences?.gameComments || {}) };
+  if (gameId) gameComments[gameId] = $("#notifyGameComments").checked;
+  try {
+    const result = await fetchJSON("/api/comment-notifications/preferences", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ replies: $("#notifyReplies").checked, likes: $("#notifyLikes").checked, gameComments }) });
+    state.notificationPreferences = result.profile.notificationPreferences;
+  } catch (error) { showToast(error.message); }
+}
+
+async function openCommentProfile() {
+  if (!state.session.authenticated) { openAuth(); return; }
+  try {
+    const result = await fetchJSON("/api/comment-profile");
+    state.commentProfile = result.profile;
+    $("#commentProfileName").value = result.profile.name;
+    $("#commentProfilePreview").innerHTML = `${echoAvatar(result.profile)}<div><strong>${escapeHTML(result.profile.name)}</strong><p>${escapeHTML(result.profile.team || "独立观测者")}</p></div>`;
+    $("#commentProfileDialog").showModal();
+  } catch (error) { showToast(error.message); }
+}
+
+async function saveCommentProfile(event) {
+  event.preventDefault();
+  const data = new FormData();
+  data.set("name", $("#commentProfileName").value);
+  data.set("clearAvatar", String($("#clearCommentAvatar").checked));
+  if ($("#commentProfileAvatar").files[0]) data.set("avatar", $("#commentProfileAvatar").files[0]);
+  try {
+    const result = await fetchJSON("/api/comment-profile", { method: "PUT", body: data });
+    state.commentProfile = result.profile;
+    state.session.identity.name = result.profile.name;
+    $("#commentProfileDialog").close();
+    renderCommentIdentity();
+    updateAccountUI();
+    if (!$("#commentPanel").hidden) await loadComments({ reset: true });
+    showToast("观测者资料已同步。")
+  } catch (error) { $("#commentProfileMessage").textContent = error.message; }
+}
+
+function openCommentImage(url) {
+  $("#commentImageOriginal").src = url;
+  $("#commentImageViewer").showModal();
+}
+
 function populateDetail(game) {
   $("#detailCoordinate").textContent = coordinateLabel(game);
   $("#detailTeam").textContent = game.team;
@@ -1943,6 +2344,7 @@ function populateDetail(game) {
   $("#detailDescription").innerHTML = renderMarkdown(game.description || game.shortDescription || "游戏简介暂未填写。");
   $("#detailCreationNote").innerHTML = renderMarkdown(game.creationNote || "创作手记暂未填写。");
   $("#detailLateBadge").hidden = !game.lateSubmission;
+  $("#detailOfficialBadge").hidden = !game.isOfficial;
   $("#creationNoteSection").hidden = !game.creationNote;
   $("#detailTags").innerHTML = (game.tags || []).map((tag) => `<span>${escapeHTML(tag)}</span>`).join("");
 
@@ -1989,6 +2391,7 @@ function populateDetail(game) {
     creatorCaption.innerHTML = creatorCaptionMarkup(creator);
   }));
   updateDetailVoteButton();
+  loadCommentPreview(game.id);
 }
 
 function openDetail(id) {
@@ -2038,6 +2441,7 @@ function openDetail(id) {
 function closeDetail() {
   const detail = $("#planetDetail");
   if (detail.hidden || state.landing) return;
+  if (!$("#commentPanel").hidden) closeComments();
   closeReturnVoteConfirm({ restoreFocus: false, force: true });
   const closedId = state.detailId;
   const game = state.gameById.get(closedId);
@@ -2108,7 +2512,7 @@ function renderSearch(query = "") {
   $("#searchResults").innerHTML = games.length ? games.map((game) => `
     <button class="search-result" type="button" data-search-id="${escapeHTML(game.id)}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
-      <div><strong>${escapeHTML(game.title)}${game.lateSubmission ? ` <small class="late-badge">补交</small>` : ""}</strong><span>${escapeHTML(game.team)}</span></div>
+      <div><strong>${escapeHTML(game.title)}${game.isOfficial ? ` <small class="official-badge">官方作品</small>` : ""}${game.lateSubmission ? ` <small class="late-badge">补交</small>` : ""}</strong><span>${escapeHTML(game.team)}</span></div>
       <code>${escapeHTML(coordinateLabel(game))}</code>
     </button>
   `).join("") : state.games.length
@@ -2340,6 +2744,8 @@ async function verifyAuth(event) {
     updateAccountUI();
     renderBallot();
     updateDetailVoteButton();
+    await refreshNotifications();
+    if (!$("#commentPanel").hidden) await loadComments({ reset: true });
     showToast(state.pendingInvitedIdentity ? "受邀身份已同步，可以继续管理作品和投票。" : "登录成功，之后可以直接修改投票。" );
     setInvitedIdentityMode(false);
     const pending = state.pendingVoteId;
@@ -2369,6 +2775,8 @@ async function logout() {
   closeDialog($("#ballotDialog"));
   updateAccountUI();
   updateDetailVoteButton();
+  refreshNotifications();
+  if (!$("#commentPanel").hidden) loadComments({ reset: true });
   showToast("已退出登录。" );
 }
 
@@ -3201,6 +3609,7 @@ async function updateBallot(gameIds) {
 async function toggleVote(id) {
   const game = state.gameById.get(id);
   if (!game) return;
+  if (game.isOfficial) return showToast("官方作品不参与投票与评奖。");
   if (state.site.votingState !== "open") return showToast(votingCopy().label);
   if (!state.session.authenticated) return openAuth(id);
   if (state.ballot.gameIds.includes(id)) return openReturnVoteConfirm(id);
@@ -3320,7 +3729,7 @@ function renderAccessibleIndex() {
     return `
     <button type="button" data-accessible-game="${escapeHTML(game.id)}" aria-label="${escapeHTML(known ? `${game.title}，${game.team}，坐标 ${coordinateLabel(game)}` : `未知作品，坐标 ${coordinateLabel(game)}`)}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
-      <span><strong>${escapeHTML(known ? game.title : "未知作品")}${known && game.lateSubmission ? ` <em class="late-badge">补交</em>` : ""}</strong><small>${escapeHTML(known ? game.team : "尚未完成身份解析")}</small></span>
+      <span><strong>${escapeHTML(known ? game.title : "未知作品")}${known && game.isOfficial ? ` <em class="official-badge">官方作品</em>` : ""}${known && game.lateSubmission ? ` <em class="late-badge">补交</em>` : ""}</strong><small>${escapeHTML(known ? game.team : "尚未完成身份解析")}</small></span>
       <code>${escapeHTML(coordinateLabel(game))}</code>
     </button>
   `;
@@ -3574,6 +3983,78 @@ function bindUI() {
   $("#openTarget").addEventListener("click", approachOrOpenTarget);
   $("#closeDetail").addEventListener("click", closeDetail);
   $("#shareGame").addEventListener("click", shareCurrentGame);
+  $("#openComments").addEventListener("click", openComments);
+  $("#closeComments").addEventListener("click", closeComments);
+  $("#commentForm").addEventListener("submit", submitComment);
+  $("#commentBody").addEventListener("input", (event) => { $("#commentLength").textContent = `${event.target.value.length}/2000`; });
+  $("#chooseCommentImages").addEventListener("click", () => $("#commentImages").click());
+  $("#commentImages").addEventListener("change", (event) => { setCommentFiles(event.target.files, "comment"); event.target.value = ""; });
+  $("#replyImages").addEventListener("change", (event) => { clearLocalFiles("reply"); setCommentFiles(event.target.files, "reply"); event.target.value = ""; });
+  $("#replyBody").addEventListener("input", (event) => { $("#replyLength").textContent = `${event.target.value.length}/1000`; });
+  $("#replyForm").addEventListener("submit", submitReply);
+  $("#closeReply").addEventListener("click", () => $("#replyDialog").close());
+  $("#commentProfileButton").addEventListener("click", openCommentProfile);
+  $("#commentProfileForm").addEventListener("submit", saveCommentProfile);
+  $("#closeCommentProfile").addEventListener("click", () => $("#commentProfileDialog").close());
+  $("#notificationButton").addEventListener("click", openNotifications);
+  $("#commentNotificationsButton").addEventListener("click", openNotifications);
+  $("#closeNotifications").addEventListener("click", () => $("#notificationDialog").close());
+  const closeCommentDelete = () => { state.pendingCommentDeleteId = ""; closeDialog($("#commentDeleteDialog")); };
+  $("#cancelCommentDeleteTop").addEventListener("click", closeCommentDelete);
+  $("#cancelCommentDelete").addEventListener("click", closeCommentDelete);
+  $("#confirmCommentDelete").addEventListener("click", deleteComment);
+  $("#readAllNotifications").addEventListener("click", async () => { await fetchJSON("/api/comment-notifications/read-all", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); await refreshNotifications(); openNotifications(); });
+  [$("#notifyReplies"), $("#notifyLikes"), $("#notifyGameComments")].forEach((input) => input.addEventListener("change", saveNotificationPreferences));
+  $("#closeCommentImage").addEventListener("click", () => $("#commentImageViewer").close());
+  $("#commentImageViewer").addEventListener("click", (event) => { if (event.target === $("#commentImageViewer")) $("#commentImageViewer").close(); });
+  $("#commentPanel").addEventListener("click", (event) => {
+    const tag = event.target.closest("[data-comment-tag]");
+    if (tag) {
+      const id = tag.dataset.commentTag;
+      if (state.selectedCommentTags.has(id)) state.selectedCommentTags.delete(id);
+      else if (state.selectedCommentTags.size < 5) state.selectedCommentTags.add(id);
+      renderCommentTagPicker();
+      return;
+    }
+    const action = event.target.closest("[data-comment-action]");
+    if (action) {
+      const { commentAction, commentId } = action.dataset;
+      if (commentAction === "reply") openReply(commentId);
+      else if (commentAction === "like") toggleCommentLike(commentId, action.getAttribute("aria-pressed") === "true");
+      else if (commentAction === "delete") requestCommentDelete(commentId);
+      else if (commentAction === "expand") expandReplies(commentId);
+      return;
+    }
+    const image = event.target.closest("[data-echo-image]");
+    if (image) openCommentImage(image.dataset.echoImage);
+    if (event.target.closest("[data-comment-login]")) openAuth();
+  });
+  $("#echoPreviewList").addEventListener("click", (event) => {
+    const image = event.target.closest("[data-echo-image]");
+    if (image) openCommentImage(image.dataset.echoImage);
+  });
+  document.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-local-image]");
+    if (!remove) return;
+    const key = remove.dataset.localKind === "reply" ? "replyFiles" : "commentFiles";
+    const [removed] = state[key].splice(Number(remove.dataset.removeLocalImage), 1);
+    if (removed) URL.revokeObjectURL(removed.preview);
+    renderLocalImages(remove.dataset.localKind === "reply" ? $("#replyImagePreview") : $("#commentImagePreview"), state[key], remove.dataset.localKind);
+  });
+  $("#notificationList").addEventListener("click", async (event) => {
+    const target = event.target.closest("[data-notification-comment]");
+    if (!target) return;
+    $("#notificationDialog").close();
+    await fetchJSON("/api/comment-notifications/read-all", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const gameId = target.dataset.notificationGame;
+    if (state.detailId !== gameId) {
+      if (state.detailId) closeDetail();
+      setTimeout(() => openDetail(gameId), state.reducedMotion ? 20 : 820);
+      setTimeout(openComments, state.reducedMotion ? 80 : 1780);
+    } else if ($("#commentPanel").hidden) await openComments();
+    await expandReplies(target.dataset.notificationRoot).catch?.(() => {});
+    setTimeout(() => $(`[data-comment-card="${CSS.escape(target.dataset.notificationComment)}"]`)?.scrollIntoView({ behavior: state.reducedMotion ? "auto" : "smooth", block: "center" }), 300);
+  });
   $("#detailVote").addEventListener("click", () => state.detailId && toggleVote(state.detailId));
   $("#searchButton").addEventListener("click", openSearch);
   $("#navigationHelp").addEventListener("click", toggleNavigationHelp);
@@ -3688,7 +4169,7 @@ function bindUI() {
   $("#closeResults").addEventListener("click", () => { $("#resultConsole").hidden = true; });
   $("#shareResults").addEventListener("click", shareResults);
   $("#enterResultUniverse").addEventListener("click", enterResultUniverse);
-  [$("#searchDialog"), $("#authDialog"), $("#ballotDialog")].forEach((dialog) => dialog.addEventListener("click", (event) => {
+  [$("#searchDialog"), $("#authDialog"), $("#ballotDialog"), $("#replyDialog"), $("#commentProfileDialog"), $("#notificationDialog"), $("#commentDeleteDialog")].forEach((dialog) => dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog === $("#ballotDialog") ? closeBallotDialog() : closeDialog(dialog);
   }));
   document.addEventListener("keydown", (event) => {
@@ -3764,6 +4245,12 @@ function bindUI() {
   if ("ResizeObserver" in window) {
     new ResizeObserver(refreshCeremonyGeometry).observe($("#personalSystem"));
   }
+  if ("IntersectionObserver" in window) {
+    state.commentObserver = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && !$("#commentPanel").hidden && state.commentNextOffset !== null) loadComments();
+    }, { root: $("#commentScroller"), rootMargin: "300px" });
+    state.commentObserver.observe($("#commentSentinel"));
+  }
 }
 
 async function loadApplication() {
@@ -3786,6 +4273,7 @@ async function loadApplication() {
     renderAccessibleIndex();
     renderResults();
     updateEmptyObservatory();
+    refreshNotifications();
   } catch (error) {
     const loading = $("#mapLoading");
     loading.hidden = false;

@@ -6,7 +6,9 @@ const adminState = {
   fullAudit: null,
   editingId: "",
   creators: [],
-  voterQuery: ""
+  voterQuery: "",
+  commentAdmin: null,
+  commentQuery: ""
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -105,7 +107,7 @@ function normalizedName(value) {
 }
 
 function renderRanking() {
-  const games = adminState.dashboard.games.slice().sort((a, b) => b.voteCount - a.voteCount || a.title.localeCompare(b.title, "zh-Hans-CN"));
+  const games = adminState.dashboard.games.filter((game) => !game.isOfficial).slice().sort((a, b) => b.voteCount - a.voteCount || a.title.localeCompare(b.title, "zh-Hans-CN"));
   $("#adminRanking").innerHTML = `
     <div class="ranking-head"><strong>当前票数</strong><span>投票期间仅后台可见</span></div>
     <div class="ranking-rows">
@@ -128,12 +130,12 @@ function renderGames() {
     return;
   }
   list.innerHTML = games.map((game) => `
-    <article class="admin-game-item ${game.published ? "" : "draft"} ${game.lateSubmission ? "late" : ""} ${game.status === "abandoned" ? "abandoned" : ""}">
+    <article class="admin-game-item ${game.published ? "" : "draft"} ${game.lateSubmission ? "late" : ""} ${game.isOfficial ? "official" : ""} ${game.status === "abandoned" ? "abandoned" : ""}">
       <img src="${escapeHTML(game.coverUrl || "/assets/pass-texture.png")}" alt="" />
       <div>
         <strong>${escapeHTML(game.title || "未命名草稿")}</strong>
         <span>${escapeHTML(game.team)}</span>
-        <small>${gameStatusLabel(game)}${game.lateSubmission ? " / 补交" : ""}${game.featured ? " / 本期主推" : ""} / ${game.voteCount} 票</small>
+        <small>${gameStatusLabel(game)}${game.isOfficial ? " / 官方作品（不参与投票与评奖）" : ""}${game.lateSubmission ? " / 补交" : ""}${game.featured ? " / 本期主推" : ""}${game.isOfficial ? "" : ` / ${game.voteCount} 票`}</small>
         ${game.status === "abandoned"
           ? `<label class="owner-binding"><span>作品归属</span><em>已释放（审计保留）</em></label>`
           : `<label class="owner-binding"><span>唯一负责人邮箱</span><input type="email" data-owner-email="${escapeHTML(game.id)}" value="${escapeHTML(game.ownerEmail || "")}" placeholder="name@example.com" /></label>`}
@@ -307,6 +309,105 @@ function renderAudit() {
     </article>`).join("");
 }
 
+function renderCommentAdmin() {
+  const data = adminState.commentAdmin;
+  if (!data) return;
+  const paused = Boolean(data.settings.commentsPaused);
+  $("#toggleGlobalComments").textContent = paused ? "恢复全站评论" : "暂停全站评论";
+  $("#toggleGlobalComments").classList.toggle("danger-action", !paused);
+  $("#commentGameSettings").innerHTML = data.settings.games.map((game) => `<div class="comment-game-setting"><span><strong>${escapeHTML(game.title || "未命名作品")}</strong><small>${game.commentsReadOnly ? "只读" : "开放交流"}</small></span><button class="text-action ${game.commentsReadOnly ? "" : "danger-action"}" data-comment-game-setting="${escapeHTML(game.id)}" data-readonly="${game.commentsReadOnly}">${game.commentsReadOnly ? "恢复交流" : "设为只读"}</button></div>`).join("") || `<div class="admin-empty">暂无作品</div>`;
+  $("#commentTagList").innerHTML = data.tags.slice().sort((a, b) => a.order - b.order).map((tag) => `<div class="comment-tag-admin ${tag.enabled ? "" : "disabled"}"><span><strong>${escapeHTML(tag.label)}</strong><small>${escapeHTML(tag.group)}</small></span><button class="text-action" data-comment-tag-toggle="${escapeHTML(tag.id)}" data-enabled="${tag.enabled}">${tag.enabled ? "停用" : "恢复"}</button></div>`).join("");
+  const needle = adminState.commentQuery.trim().toLowerCase();
+  const comments = data.comments.filter((comment) => !needle || [comment.gameTitle, comment.author?.name, comment.authorEmail, comment.body].join(" ").toLowerCase().includes(needle));
+  $("#commentAdminList").innerHTML = comments.map((comment) => `<article class="comment-admin-item ${comment.status}">
+    <header><div><strong>${escapeHTML(comment.author?.name || "观测者")}</strong>${comment.author?.developer ? `<em>开发者</em>` : ""}<span>${escapeHTML(comment.authorEmail || "")}</span></div><time>${formatDate(comment.createdAt)}</time></header>
+    <p class="comment-admin-game">${escapeHTML(comment.gameTitle)} / ${comment.replyToId ? `回复 @${escapeHTML(comment.replyToName || "观测者")}` : "一级评论"}</p>
+    <div class="comment-admin-body">${escapeHTML(comment.body || (comment.images?.length ? "仅图片" : "无公开文字"))}</div>
+    ${comment.tags?.length ? `<div class="comment-admin-tags">${comment.tags.map((tag) => `<span>${escapeHTML(tag.label)}${tag.custom ? "（自定义）" : ""}${tag.custom ? `<button type="button" data-remove-comment-tag="${escapeHTML(comment.id)}:${escapeHTML(tag.id)}">移除</button>` : ""}</span>`).join("")}</div>` : ""}
+    ${comment.images?.length ? `<div class="comment-admin-images">${comment.images.map((image) => `<figure><img src="${escapeHTML(image.thumbnailUrl || image.url)}" alt="" /><button type="button" data-remove-comment-image="${escapeHTML(comment.id)}:${escapeHTML(image.id)}">删除违规图片</button></figure>`).join("")}</div>` : ""}
+    <div class="comment-admin-actions">
+      <button class="text-action ${comment.status === "active" ? "danger-action" : ""}" data-moderate-comment="${escapeHTML(comment.id)}" data-action="${comment.status === "hidden" ? "restore" : "hide"}">${comment.status === "hidden" ? "恢复显示" : "隐藏信号"}</button>
+      <button class="text-action danger-action" data-mute-comment-author="${escapeHTML(comment.authorEmail || "")}">禁言邮箱</button>
+      ${data.mutes?.[comment.authorEmail] ? `<button class="text-action" data-unmute-comment-author="${escapeHTML(comment.authorEmail)}">解除禁言</button>` : ""}
+    </div>
+  </article>`).join("") || `<div class="admin-empty"><strong>没有匹配的回声</strong><span>新评论会在这里立即出现。</span></div>`;
+
+  $$('[data-comment-game-setting]').forEach((button) => button.addEventListener("click", () => updateGameCommentSetting(button.dataset.commentGameSetting, button.dataset.readonly !== "true")));
+  $$('[data-comment-tag-toggle]').forEach((button) => button.addEventListener("click", () => updateCommentTag(button.dataset.commentTagToggle, button.dataset.enabled !== "true")));
+  $$('[data-moderate-comment]').forEach((button) => button.addEventListener("click", () => moderateComment(button.dataset.moderateComment, button.dataset.action)));
+  $$('[data-remove-comment-image]').forEach((button) => button.addEventListener("click", () => { const [id, imageId] = button.dataset.removeCommentImage.split(":"); moderateComment(id, "remove-image", { imageId }); }));
+  $$('[data-remove-comment-tag]').forEach((button) => button.addEventListener("click", () => { const [id, tagId] = button.dataset.removeCommentTag.split(":"); moderateComment(id, "remove-custom-tag", { tagId }); }));
+  $$('[data-mute-comment-author]').forEach((button) => button.addEventListener("click", () => muteCommentAuthor(button.dataset.muteCommentAuthor)));
+  $$('[data-unmute-comment-author]').forEach((button) => button.addEventListener("click", () => unmuteCommentAuthor(button.dataset.unmuteCommentAuthor)));
+}
+
+async function reloadCommentAdmin() {
+  adminState.commentAdmin = await adminFetch("/api/admin/comments");
+  renderCommentAdmin();
+}
+
+async function toggleGlobalComments() {
+  const paused = Boolean(adminState.commentAdmin?.settings.commentsPaused);
+  const reason = window.prompt(`${paused ? "恢复" : "暂停"}全站评论的原因：`);
+  if (!reason?.trim()) return;
+  await adminFetch("/api/admin/comments/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ paused: !paused, reason: reason.trim() }) });
+  await reloadCommentAdmin();
+  showToast(paused ? "全站评论已恢复" : "全站评论已暂停");
+}
+
+async function updateGameCommentSetting(gameId, readOnly) {
+  const reason = window.prompt(`${readOnly ? "将作品讨论设为只读" : "恢复作品交流"}的原因：`);
+  if (!reason?.trim()) return;
+  await adminFetch(`/api/admin/games/${encodeURIComponent(gameId)}/comments/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ readOnly, reason: reason.trim() }) });
+  await reloadCommentAdmin();
+}
+
+async function createCommentTag(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  try {
+    await adminFetch("/api/admin/comments/tags", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    event.currentTarget.reset();
+    await reloadCommentAdmin();
+  } catch (error) { showToast(error.message); }
+}
+
+async function updateCommentTag(id, enabled) {
+  try {
+    await adminFetch(`/api/admin/comments/tags/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) });
+    await reloadCommentAdmin();
+  } catch (error) { showToast(error.message); }
+}
+
+async function moderateComment(id, action, extra = {}) {
+  const reason = window.prompt(`执行“${action}”的管理原因（永久进入审计）：`);
+  if (!reason?.trim()) return;
+  try {
+    await adminFetch(`/api/admin/comments/${encodeURIComponent(id)}/moderate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, reason: reason.trim(), ...extra }) });
+    await reloadCommentAdmin();
+  } catch (error) { showToast(error.message); }
+}
+
+async function muteCommentAuthor(email) {
+  const duration = window.prompt("禁言时长：输入 1h、1d、7d 或 permanent", "1d");
+  if (!duration) return;
+  const reason = window.prompt("禁言原因（永久进入审计）：");
+  if (!reason?.trim()) return;
+  try {
+    await adminFetch(`/api/admin/comment-mutes/${encodeURIComponent(email)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ duration, reason: reason.trim() }) });
+    await reloadCommentAdmin();
+  } catch (error) { showToast(error.message); }
+}
+
+async function unmuteCommentAuthor(email) {
+  const reason = window.prompt("解除禁言原因（永久进入审计）：");
+  if (!reason?.trim()) return;
+  try {
+    await adminFetch(`/api/admin/comment-mutes/${encodeURIComponent(email)}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: reason.trim() }) });
+    await reloadCommentAdmin();
+  } catch (error) { showToast(error.message); }
+}
+
 function renderDashboard() {
   const dashboard = adminState.dashboard;
   $("#adminEventTitle").textContent = dashboard.settings.eventTitle;
@@ -321,17 +422,20 @@ function renderDashboard() {
   renderBallots();
   renderResultControl();
   renderAudit();
+  renderCommentAdmin();
   fillSettings();
   $("#auditGameFilter").innerHTML = `<option value="">全部作品</option>${dashboard.games.map((game) => `<option value="${escapeHTML(game.id)}">${escapeHTML(game.title || "未命名草稿")}</option>`).join("")}`;
 }
 
 async function loadDashboard() {
-  const [dashboard, auditResult] = await Promise.all([
+  const [dashboard, auditResult, comments] = await Promise.all([
     adminFetch("/api/admin/dashboard"),
-    adminFetch("/api/admin/audit?limit=500")
+    adminFetch("/api/admin/audit?limit=500"),
+    adminFetch("/api/admin/comments")
   ]);
   adminState.dashboard = dashboard;
   adminState.fullAudit = auditResult.audit;
+  adminState.commentAdmin = comments;
   renderDashboard();
 }
 
@@ -400,6 +504,7 @@ function resetGameForm() {
   form.reset();
   form.elements.order.value = "100";
   form.elements.published.checked = true;
+  form.elements.isOfficial.checked = false;
   adminState.editingId = "";
   adminState.creators = [];
   renderCreatorRows();
@@ -434,6 +539,7 @@ function editGame(id) {
   form.elements.videoExternalUrl.value = game.videoExternalUrl || "";
   form.elements.published.checked = Boolean(game.published);
   form.elements.featured.checked = Boolean(game.featured);
+  form.elements.isOfficial.checked = Boolean(game.isOfficial);
   $("#editorTitle").textContent = `编辑：${game.title}`;
   $("#editorHint").textContent = "未重新上传的素材保持不变；参赛权限与自投限制以邮箱为准";
   $("#saveGame").textContent = "更新作品";
@@ -778,6 +884,10 @@ function init() {
     renderBallots();
   });
   $("#regeneratePlanet").addEventListener("click", regeneratePlanet);
+  $("#toggleGlobalComments").addEventListener("click", () => toggleGlobalComments().catch((error) => showToast(error.message)));
+  $("#refreshComments").addEventListener("click", () => reloadCommentAdmin().catch((error) => showToast(error.message)));
+  $("#commentTagForm").addEventListener("submit", createCommentTag);
+  $("#commentAdminSearch").addEventListener("input", (event) => { adminState.commentQuery = event.target.value; renderCommentAdmin(); });
   renderCreatorRows();
 
   if (adminState.password) {

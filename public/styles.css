@@ -1506,6 +1506,11 @@ select:focus {
   padding-left: 14px;
 }
 
+.admin-game-item.official {
+  border-left: 3px solid var(--signal);
+  padding-left: 14px;
+}
+
 .admin-game-item img {
   width: 112px;
   aspect-ratio: 16 / 10;
@@ -2134,6 +2139,146 @@ select:focus {
     grid-template-columns: 1fr;
     gap: 8px;
   }
+}
+
+.comment-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.34fr) minmax(0, 0.66fr);
+  gap: 32px;
+}
+
+.comment-admin-controls,
+.comment-admin-stream,
+.comment-admin-subsection,
+.comment-tag-form {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.comment-admin-subsection,
+.comment-tag-form {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.comment-admin-subsection h3,
+.comment-tag-form h3 {
+  font-size: 0.86rem;
+}
+
+.comment-game-setting,
+.comment-tag-admin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 10px 0;
+}
+
+.comment-game-setting > span,
+.comment-tag-admin > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.comment-game-setting strong,
+.comment-tag-admin strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+
+.comment-game-setting small,
+.comment-tag-admin small {
+  color: var(--muted);
+  font-size: 0.64rem;
+}
+
+.comment-tag-admin.disabled { opacity: 0.46; }
+.comment-admin-filter { display: flex; justify-content: flex-end; }
+
+#commentAdminList {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.comment-admin-item {
+  display: grid;
+  gap: 11px;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0;
+}
+
+.comment-admin-item.hidden { opacity: 0.62; }
+
+.comment-admin-item > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.comment-admin-item > header > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 12px;
+}
+
+.comment-admin-item > header strong { font-size: 0.78rem; }
+.comment-admin-item > header em { color: var(--accent); font-size: 0.62rem; font-style: normal; }
+.comment-admin-item > header span,
+.comment-admin-item > header time,
+.comment-admin-game { color: var(--muted); font-size: 0.64rem; }
+.comment-admin-body { color: var(--ink); font-size: 0.76rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.comment-admin-tags,
+.comment-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.comment-admin-tags span {
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.comment-admin-tags button {
+  margin-left: 5px;
+  border: 0;
+  padding: 0;
+  color: var(--danger);
+  background: transparent;
+  font: inherit;
+}
+
+.comment-admin-images {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.comment-admin-images figure {
+  position: relative;
+  margin: 0;
+  border: 1px solid var(--line);
+}
+
+.comment-admin-images img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.comment-admin-images button { width: 100%; border: 0; border-top: 1px solid var(--line); padding: 7px; color: var(--danger); background: transparent; font-size: 0.62rem; }
+
+@media (max-width: 980px) {
+  .comment-admin-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .comment-admin-images { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

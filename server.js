@@ -10,6 +10,7 @@ const Busboy = require("busboy");
 const nodemailer = require("nodemailer");
 const { ZipArchive } = require("archiver");
 const ExcelJS = require("exceljs");
+const { createCommentService, defaultCommentTags } = require("./comments");
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -231,6 +232,7 @@ function backfillEmailVerifications(store) {
   for (const session of Object.values(store.sessions)) {
     recordEmailVerification(store, session?.email, session?.createdAt);
   }
+
   for (const game of store.games) {
     for (const member of game.teamMembers) {
       member.firstLoginAt ||= firstEmailVerificationAt(store, member.email);
@@ -259,6 +261,14 @@ function gameStatus(game) {
 
 function isGamePublic(game) {
   return gameStatus(game) === "submitted" && game.published !== false;
+}
+
+function isOfficialGame(game) {
+  return Boolean(game?.isOfficial);
+}
+
+function isVoteEligibleGame(game) {
+  return isGamePublic(game) && !isOfficialGame(game);
 }
 
 function gameMemberEmails(game, { historical = false } = {}) {
@@ -391,7 +401,7 @@ function ensureGameCoordinates(store) {
 
 function createEmptyStore() {
   return {
-    version: 7,
+    version: 9,
     createdAt: new Date().toISOString(),
     games: [],
     ballots: [],
@@ -401,6 +411,11 @@ function createEmptyStore() {
     emailVerifications: {},
     audit: [],
     retiredAssets: [],
+    comments: [],
+    commentProfiles: {},
+    commentNotifications: [],
+    commentMutes: {},
+    commentTags: defaultCommentTags(),
     settings: {
       eventTitle: "溯造 MiniGame 游戏开发大赛",
       theme: "宇宙",
@@ -413,7 +428,8 @@ function createEmptyStore() {
       winnerGameIds: [],
       constellationGameIds: [],
       adjudication: null,
-      publishedAt: null
+      publishedAt: null,
+      commentsPaused: false
     }
   };
 }
@@ -421,7 +437,7 @@ function createEmptyStore() {
 function migrateStore(store) {
   const empty = createEmptyStore();
   const defaultDemoById = new Map(empty.games.map((game) => [game.id, game]));
-  store.version = 7;
+  store.version = 9;
   store.games = (Array.isArray(store.games) ? store.games : empty.games).map((game) => {
     const status = gameStatus(game);
     const legacyVideo = cleanAssetUrl(game.videoUrl);
@@ -433,6 +449,7 @@ function migrateStore(store) {
       ...game,
       status,
       published: status === "submitted" && game.published !== false,
+      isOfficial: Boolean(game.isOfficial),
       ownerEmail,
       ownerCreatorId: cleanText(game.ownerCreatorId, 80),
       historicalOwnerEmails: [...new Set([ownerEmail, ...(Array.isArray(game.historicalOwnerEmails) ? game.historicalOwnerEmails : [])].map(normalizeEmail).filter(Boolean))],
@@ -466,8 +483,9 @@ function migrateStore(store) {
     };
   });
   store.ballots = Array.isArray(store.ballots) ? store.ballots : [];
+  const officialGameIds = new Set(store.games.filter(isOfficialGame).map((game) => game.id));
   store.ballots.forEach((ballot) => {
-    ballot.gameIds = [...new Set(Array.isArray(ballot.gameIds) ? ballot.gameIds : [])].slice(0, 3);
+    ballot.gameIds = [...new Set(Array.isArray(ballot.gameIds) ? ballot.gameIds : [])].filter((id) => !officialGameIds.has(id)).slice(0, 3);
     ballot.version = Math.max(1, Number(ballot.version || 1));
   });
   store.ballotOperations = store.ballotOperations && typeof store.ballotOperations === "object" && !Array.isArray(store.ballotOperations)
@@ -482,8 +500,15 @@ function migrateStore(store) {
   store.audit = Array.isArray(store.audit) ? store.audit : [];
   backfillEmailVerifications(store);
   store.retiredAssets = (Array.isArray(store.retiredAssets) ? store.retiredAssets : []).map(normalizeAssetMeta).filter((asset) => asset?.url);
+  store.comments = Array.isArray(store.comments) ? store.comments : [];
+  store.commentProfiles = store.commentProfiles && typeof store.commentProfiles === "object" && !Array.isArray(store.commentProfiles) ? store.commentProfiles : {};
+  store.commentNotifications = Array.isArray(store.commentNotifications) ? store.commentNotifications : [];
+  store.commentMutes = store.commentMutes && typeof store.commentMutes === "object" && !Array.isArray(store.commentMutes) ? store.commentMutes : {};
+  store.commentTags = Array.isArray(store.commentTags) && store.commentTags.length ? store.commentTags : defaultCommentTags();
   const previousSettings = store.settings && typeof store.settings === "object" ? store.settings : {};
   store.settings = { ...empty.settings, ...previousSettings };
+  store.settings.commentsPaused = Boolean(store.settings.commentsPaused);
+  store.games.forEach((game) => { game.commentsReadOnly = Boolean(game.commentsReadOnly); });
   if (!previousSettings.submissionEndAt) store.settings.submissionEndAt = previousSettings.endAt || empty.settings.submissionEndAt;
   if (store.settings.eventTitle === "溯造 MiniGame 2026") store.settings.eventTitle = empty.settings.eventTitle;
   if (!store.settings.eventSeed) store.settings.eventSeed = empty.settings.eventSeed;
@@ -718,9 +743,10 @@ function activeBallots(store) {
 
 function voteCounts(store) {
   const counts = Object.fromEntries(store.games.map((game) => [game.id, 0]));
+  const eligibleIds = new Set(store.games.filter(isVoteEligibleGame).map((game) => game.id));
   for (const ballot of activeBallots(store)) {
     for (const id of ballot.gameIds || []) {
-      if (Object.hasOwn(counts, id)) counts[id] += 1;
+      if (eligibleIds.has(id)) counts[id] += 1;
     }
   }
   return counts;
@@ -729,7 +755,7 @@ function voteCounts(store) {
 function rankedGames(store) {
   const counts = voteCounts(store);
   return store.games
-    .filter(isGamePublic)
+    .filter(isVoteEligibleGame)
     .map((game) => ({ id: game.id, title: game.title, team: game.team, coverUrl: game.coverUrl, voteCount: counts[game.id] || 0 }))
     .sort((a, b) => b.voteCount - a.voteCount || a.title.localeCompare(b.title, "zh-Hans-CN"));
 }
@@ -796,6 +822,9 @@ function publicSite(store) {
       videoExternalUrl: game.videoExternalUrl || "",
       downloadUrl: game.downloadUrl ? `/api/games/${encodeURIComponent(game.id)}/download` : "",
       lateSubmission: Boolean(game.lateSubmission),
+      isOfficial: isOfficialGame(game),
+      commentsReadOnly: Boolean(game.commentsReadOnly),
+      commentCount: store.comments.filter((comment) => comment.gameId === game.id && !comment.replyToId && comment.status !== "hidden" && !(comment.status === "deleted" && comment.deleteMode === "removed")).length,
       tags: game.tags || [],
       planetSeed: game.planetSeed,
       coordinate: game.coordinate
@@ -810,7 +839,8 @@ function publicSite(store) {
       eventSeed: store.settings.eventSeed,
       startAt: store.settings.startAt,
       endAt: store.settings.endAt,
-      submissionEndAt: store.settings.submissionEndAt
+      submissionEndAt: store.settings.submissionEndAt,
+      commentsPaused: Boolean(store.settings.commentsPaused)
     },
     votingState: state,
     resultsVisible: showResults,
@@ -990,6 +1020,30 @@ function addAudit(store, event) {
   store.audit.push({ id: randomId(), createdAt: new Date().toISOString(), ...event });
 }
 
+function invalidateBallotsForGame(store, gameId, action) {
+  const now = new Date().toISOString();
+  let invalidated = 0;
+  for (const ballot of store.ballots) {
+    if (!ballot.gameIds.includes(gameId)) continue;
+    const before = [...ballot.gameIds];
+    ballot.gameIds = before.filter((id) => id !== gameId);
+    ballot.version = Number(ballot.version || 1) + 1;
+    ballot.updatedAt = now;
+    invalidated += 1;
+    addAudit(store, {
+      action,
+      actorType: "system",
+      actorId: "system",
+      gameId,
+      voterId: ballot.id,
+      voterEmail: ballot.email,
+      before,
+      after: [...ballot.gameIds]
+    });
+  }
+  return invalidated;
+}
+
 function membershipIdentity(store, email) {
   const assigned = participantGame(store, email);
   if (!assigned || assigned.role !== "member" || !assigned.member?.active) return null;
@@ -1045,6 +1099,13 @@ function synchronizeMembershipIdentity(store, identity, actor = {}) {
     session.name = identity.name;
     session.team = identity.team;
     session.personKey = nextPersonKey;
+  }
+
+  store.commentProfiles ||= {};
+  if (store.commentProfiles[email]) {
+    store.commentProfiles[email].name = identity.name;
+    store.commentProfiles[email].team = identity.team;
+    store.commentProfiles[email].updatedAt = now;
   }
 
   const pendingCode = store.verificationCodes?.[email];
@@ -1287,7 +1348,7 @@ async function handleBallot(req, res) {
       error.details = { ballot: ballotPayload(ballot) };
       throw error;
     }
-    const publishedGames = store.games.filter(isGamePublic);
+    const publishedGames = store.games.filter(isVoteEligibleGame);
     const gameById = new Map(publishedGames.map((game) => [game.id, game]));
     if (gameIds.some((id) => !gameById.has(id))) {
       const error = new Error("选择中包含无效或已下架的游戏。");
@@ -1385,7 +1446,7 @@ async function handleVote(req, res) {
         error.code = "VOTING_CLOSED";
         throw error;
       }
-      const validIds = new Set(store.games.filter(isGamePublic).map((game) => game.id));
+      const validIds = new Set(store.games.filter(isVoteEligibleGame).map((game) => game.id));
       if (gameIds.some((id) => !validIds.has(id))) {
         const error = new Error("选择中包含无效或已下架的游戏。");
         error.status = 400;
@@ -1920,6 +1981,7 @@ function gameFromFields(fields, files, existing = null, options = {}) {
     downloadUrl: files.gameFile?.url || (hasDownloadUrl ? cleanAssetUrl(fields.downloadUrl) : cleanAssetUrl(existing?.downloadUrl)),
     tags,
     featured: fields.featured === "true" || fields.featured === "on",
+    isOfficial: options.allowOfficial ? fields.isOfficial === "true" || fields.isOfficial === "on" : Boolean(existing?.isOfficial),
     published: options.preservePublication ? Boolean(existing?.published) : fields.published === "true" || fields.published === "on",
     order: Number.isFinite(Number(fields.order)) ? Number(fields.order) : Number(existing?.order || 100),
     planetSeed: existing?.planetSeed || crypto.createHash("sha256").update(`${title}:${team}:${Date.now()}`).digest("hex").slice(0, 16),
@@ -1966,6 +2028,7 @@ function gameAuditSnapshot(game) {
     tags: game.tags || [],
     status: gameStatus(game),
     published: Boolean(game.published),
+    isOfficial: isOfficialGame(game),
     ownerEmail: normalizeEmail(game.ownerEmail),
     teamMembers: normalizeTeamMembers(game.teamMembers),
     firstSubmittedAt: cleanText(game.firstSubmittedAt, 60),
@@ -2993,7 +3056,7 @@ async function handleAdminCreateGame(req, res, url) {
   if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
   const parsed = await parseGameMultipart(req);
   try {
-    const game = gameFromFields(parsed.fields, parsed.files);
+    const game = gameFromFields(parsed.fields, parsed.files, null, { allowOfficial: true });
     await mutateStore((store) => {
       if (game.featured) store.games.forEach((item) => { item.featured = false; });
       game.status = game.published ? "submitted" : "draft";
@@ -3031,7 +3094,14 @@ async function handleAdminUpdateGame(req, res, url, id) {
         throw error;
       }
       const before = gameAuditSnapshot(existing);
-      const game = gameFromFields(parsed.fields, parsed.files, existing);
+      const officialStatusChanged = Boolean(existing.isOfficial) !== (parsed.fields.isOfficial === "true" || parsed.fields.isOfficial === "on");
+      if (officialStatusChanged && store.settings.resultsPublished) {
+        const error = new Error("结果已发布，无法直接变更作品的投票与评奖资格。请先撤回结果后再调整。");
+        error.status = 409;
+        error.code = "RESULTS_ALREADY_PUBLISHED";
+        throw error;
+      }
+      const game = gameFromFields(parsed.fields, parsed.files, existing, { allowOfficial: true });
       game.status = game.published ? "submitted" : gameStatus(existing) === "withdrawn" ? "withdrawn" : "draft";
       if (game.status === "submitted") {
         game.firstSubmittedAt ||= new Date().toISOString();
@@ -3042,6 +3112,10 @@ async function handleAdminUpdateGame(req, res, url, id) {
         game.downloadHistory = [...(existing.downloadHistory || []), { id: randomId(), before: cleanAssetUrl(existing.downloadUrl), after: cleanAssetUrl(game.downloadUrl), actorEmail: "", actorType: "admin", createdAt: new Date().toISOString() }];
       }
       if (game.featured) store.games.forEach((item) => { item.featured = false; });
+      if (officialStatusChanged) {
+        store.settings.adjudication = null;
+        if (game.isOfficial) invalidateBallotsForGame(store, id, "ballot_invalidated_by_official_game");
+      }
       store.games[index] = game;
       addAudit(store, { action: "game_updated", actorType: "admin", actorId: "admin", gameId: id, before, after: gameAuditSnapshot(game), changes: changedGameFields(before, gameAuditSnapshot(game)) });
       return game;
@@ -3704,8 +3778,9 @@ async function handleGameDownload(req, res, id) {
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname.startsWith("/uploads/")) {
-    const requested = path.resolve(UPLOAD_DIR, path.basename(pathname));
-    if (!requested.startsWith(UPLOAD_DIR)) return notFound(res);
+    const relative = pathname.slice("/uploads/".length).replace(/\\/g, "/");
+    const requested = path.resolve(UPLOAD_DIR, relative);
+    if (requested !== UPLOAD_DIR && !requested.startsWith(`${UPLOAD_DIR}${path.sep}`)) return notFound(res);
     const downloadName = path.basename(pathname).startsWith("game-") ? `game-file${path.extname(requested)}` : "";
     return serveFile(res, requested, { range: req.headers.range, downloadName });
   }
@@ -3722,10 +3797,27 @@ async function serveStatic(req, res, url) {
   return serveFile(res, requested, { noStore: [".html", ".css", ".js"].includes(path.extname(requested).toLowerCase()) });
 }
 
+const commentService = createCommentService({
+  ensureStore,
+  mutateStore,
+  sessionRecord,
+  participantRole,
+  gameStatus,
+  isGamePublic,
+  requireAdmin,
+  json,
+  methodNotAllowed,
+  addAudit,
+  readJson,
+  personKey,
+  uploadDir: UPLOAD_DIR
+});
+
 async function router(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
     if (url.pathname.startsWith("/api/admin/") && !adminSurfaceAllowed(req)) return notFound(res);
+    if (await commentService.route(req, res, url)) return;
     if (url.pathname === "/api/health") return json(res, 200, { ok: true, time: new Date().toISOString(), timeZone: TZ });
     if (url.pathname === "/api/site") {
       if (req.method !== "GET") return methodNotAllowed(res);

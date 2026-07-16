@@ -11,7 +11,7 @@
     <meta property="og:image" content="/assets/suyo-studio.png" />
     <title>溯造 MiniGame 游戏开发大赛</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/observatory.css?v=20260715x" />
+    <link rel="stylesheet" href="/observatory.css?v=20260716echo1" />
   </head>
   <body class="observatory-body">
     <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
@@ -35,6 +35,7 @@
         <div class="account-actions">
           <a class="plain-action participant-entry" href="/submit" aria-label="提交参展">提交参展</a>
           <button class="plain-action" id="loginButton" type="button">登录</button>
+          <button class="plain-action echo-notification-button" id="notificationButton" type="button" hidden>回声 <span id="notificationCount" hidden>0</span></button>
           <button class="primary-action compact" id="ballotButton" type="button"><span class="ballot-label">我的投票</span> <span id="ballotCount">0/3</span></button>
         </div>
       </header>
@@ -175,6 +176,7 @@
       </header>
       <div class="detail-content">
         <div class="detail-title-block">
+          <p class="official-badge detail-official" id="detailOfficialBadge" hidden>官方作品 · 不参与投票与评奖</p>
           <p class="late-badge detail-late" id="detailLateBadge" hidden>补交作品</p>
           <h2 id="detailTitle"></h2>
           <p id="detailShort"></p>
@@ -203,8 +205,93 @@
           <a class="secondary-action" id="detailDownload" target="_blank" rel="noreferrer">下载游戏</a>
           <a class="secondary-action" id="detailVideoLink" target="_blank" rel="noreferrer">打开演示视频</a>
         </div>
+        <section class="echo-preview" id="echoPreview" aria-labelledby="echoPreviewTitle">
+          <div class="echo-section-heading">
+            <div><span>观测回声</span><h3 id="echoPreviewTitle">评论与交流</h3></div>
+            <strong id="echoPreviewCount">0 条信号</strong>
+          </div>
+          <p class="echo-preview-intro">作品被看见之后，讨论会成为它继续生长的第二束光。</p>
+          <div class="echo-preview-list" id="echoPreviewList" aria-live="polite"></div>
+          <button class="secondary-action echo-enter" id="openComments" type="button">进入讨论</button>
+        </section>
       </div>
     </section>
+
+    <section class="echo-space" id="commentPanel" hidden role="dialog" aria-modal="true" aria-labelledby="commentPanelTitle">
+      <header class="echo-space-header">
+        <div><span>DEEP SPACE ECHO</span><h2 id="commentPanelTitle">观测回声</h2><p id="commentPanelSubtitle"></p></div>
+        <div class="echo-space-actions">
+          <button class="plain-action" id="commentProfileButton" type="button">观测者资料</button>
+          <button class="plain-action" id="commentNotificationsButton" type="button">站内通知 <span id="panelNotificationCount" hidden>0</span></button>
+          <button class="plain-action" id="closeComments" type="button">返回作品</button>
+        </div>
+      </header>
+      <div class="echo-space-body" id="commentScroller">
+        <section class="echo-transmission" id="commentComposer">
+          <div class="echo-composer-identity" id="commentIdentity"></div>
+          <form id="commentForm">
+            <label><span>发出一段观测回声</span><textarea id="commentBody" maxlength="2000" rows="4" placeholder="说说你观察到的玩法、画面与可能性。支持只有图片的回声。"></textarea></label>
+            <div class="echo-tag-picker" id="commentTagPicker"></div>
+            <div class="echo-image-picker">
+              <input id="commentImages" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+              <button class="plain-action" id="chooseCommentImages" type="button">加入观测图像 <span id="commentImageCount">0/5</span></button>
+              <div id="commentImagePreview"></div>
+            </div>
+            <div class="echo-composer-footer"><span id="commentLength">0/2000</span><button class="primary-action" id="submitComment" type="submit">发出回声</button></div>
+            <p class="form-message" id="commentMessage" role="status"></p>
+          </form>
+        </section>
+        <div class="echo-readonly" id="commentReadonly" hidden></div>
+        <div class="echo-feed" id="commentList" aria-live="polite"></div>
+        <div class="echo-load-sentinel" id="commentSentinel"><span>正在校准回声频段</span></div>
+      </div>
+    </section>
+
+    <dialog class="station-dialog echo-dialog" id="replyDialog">
+      <form class="dialog-frame" id="replyForm">
+        <header><div><span>回应信号</span><h2 id="replyTitle">回复观测者</h2></div><button class="plain-action" id="closeReply" type="button">关闭</button></header>
+        <p class="dialog-intro" id="replyTarget"></p>
+        <label class="field-block"><span>回复内容</span><textarea id="replyBody" maxlength="1000" rows="5" placeholder="回应这段信号，也可以只发送图片。"></textarea></label>
+        <input id="replyImages" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+        <div class="echo-reply-preview" id="replyImagePreview"></div>
+        <div class="echo-composer-footer"><span id="replyLength">0/1000</span><button class="primary-action" type="submit">回应信号</button></div>
+        <p class="form-message" id="replyMessage" role="status"></p>
+      </form>
+    </dialog>
+
+    <dialog class="station-dialog echo-dialog" id="commentProfileDialog">
+      <form class="dialog-frame" id="commentProfileForm">
+        <header><div><span>观测者身份</span><h2>校准个人信号</h2></div><button class="plain-action" id="closeCommentProfile" type="button">关闭</button></header>
+        <div class="echo-profile-preview" id="commentProfilePreview"></div>
+        <label class="field-block"><span>展示姓名</span><input id="commentProfileName" maxlength="40" required /></label>
+        <label class="field-block"><span>替换观测者头像</span><input id="commentProfileAvatar" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+        <label class="echo-check"><input id="clearCommentAvatar" type="checkbox" /> 恢复系统生成头像</label>
+        <button class="primary-action full-action" type="submit">同步观测者资料</button>
+        <p class="form-message" id="commentProfileMessage" role="status"></p>
+      </form>
+    </dialog>
+
+    <dialog class="station-dialog echo-dialog notification-dialog" id="notificationDialog">
+      <div class="dialog-frame">
+        <header><div><span>站内接收器</span><h2>回声通知</h2></div><button class="plain-action" id="closeNotifications" type="button">关闭</button></header>
+        <div class="notification-controls"><button class="plain-action" id="readAllNotifications" type="button">全部已读</button><label><input id="notifyReplies" type="checkbox" checked /> 回复</label><label><input id="notifyLikes" type="checkbox" checked /> 点赞</label><label id="notifyGameCommentsLabel" hidden><input id="notifyGameComments" type="checkbox" /> 本作品新评论</label></div>
+        <div class="echo-notification-list" id="notificationList"></div>
+      </div>
+    </dialog>
+
+    <dialog class="station-dialog echo-dialog" id="commentDeleteDialog">
+      <div class="dialog-frame">
+        <header><div><span>信号管理</span><h2>收回这段回声？</h2></div><button class="plain-action" id="cancelCommentDeleteTop" type="button">关闭</button></header>
+        <p class="dialog-intro">收回后不能自行恢复。若已有回应，观测站会保留讨论结构，但隐藏你的原始内容。</p>
+        <div class="echo-composer-footer">
+          <button class="plain-action" id="cancelCommentDelete" type="button">保留回声</button>
+          <button class="primary-action" id="confirmCommentDelete" type="button">确认收回</button>
+        </div>
+        <p class="form-message" id="commentDeleteMessage" role="status"></p>
+      </div>
+    </dialog>
+
+    <dialog class="echo-image-viewer" id="commentImageViewer"><button id="closeCommentImage" type="button">关闭原图</button><img id="commentImageOriginal" src="" alt="评论原图" /></dialog>
 
     <div class="site-confirm-layer" id="returnVoteConfirm" hidden>
       <button class="site-confirm-backdrop" id="cancelReturnVoteBackdrop" type="button" aria-label="取消撤回"></button>
@@ -358,6 +445,6 @@
     <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
     <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
     <script src="/markdown.js?v=20260715a" defer></script>
-    <script src="/app.js?v=20260715x" defer></script>
+    <script src="/app.js?v=20260716echo1" defer></script>
   </body>
 </html>

@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/admin.js && node --check public/submit.js"
+    "check": "node --check server.js && node --check comments.js && node --check public/app.js && node --check public/admin.js && node --check public/submit.js"
   },
   "engines": {
     "node": ">=18"
@@ -15,7 +15,8 @@
     "archiver": "^8.0.0",
     "busboy": "^1.6.0",
     "exceljs": "^4.4.0",
-    "nodemailer": "^9.0.3"
+    "nodemailer": "^9.0.3",
+    "sharp": "^0.34.5"
   },
   "overrides": {
     "uuid": "^11.1.1"
