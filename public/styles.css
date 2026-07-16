@@ -2143,8 +2143,34 @@ select:focus {
 
 /* Admin workspace redesign: task-based density with the observatory brand language. */
 body.admin-body {
+  color-scheme: dark;
+  --bg: #0d100d;
+  --surface: #171a17;
+  --surface-strong: #232823;
+  --ink: #eff2ea;
+  --muted: #aeb5aa;
+  --line: #4b534a;
+  --line-soft: rgb(239 242 234 / 16%);
+  --accent: #c2ec24;
+  --accent-soft: rgb(194 236 36 / 15%);
+  --accent-ink: #171a17;
+  --accent-readable: #c2ec24;
+  --danger: #ff8175;
+  --danger-soft: rgb(255 129 117 / 14%);
+  --shadow: rgb(3 5 3 / 48%);
   overflow: hidden;
-  background: #0d100d;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.admin-body .brand-lockup img {
+  filter: invert(1) contrast(1.05);
+}
+
+.admin-body input::placeholder,
+.admin-body textarea::placeholder {
+  color: #858d82;
+  opacity: 1;
 }
 
 .admin-body .admin-login {
