@@ -3,12 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#e9e9e6" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#131414" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#101210" />
     <meta name="robots" content="noindex,nofollow" />
     <title>溯造 MiniGame | 轨道控制台</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/styles.css?v=20260716echo1" />
+    <link rel="stylesheet" href="/styles.css?v=20260716admin2" />
   </head>
   <body class="admin-body">
     <main class="admin-login" id="adminLogin">
@@ -17,9 +16,9 @@
           <img src="/assets/suyo-studio-transparent.png" alt="SuYo Studio 溯游工作室" />
         </a>
         <div>
-          <p class="admin-kicker">ORBITAL CONTROL</p>
-          <h1>进入轨道控制台</h1>
-          <p>管理作品、投票时间、违规选票和最终宇宙点亮。</p>
+          <p class="admin-kicker">轨道控制台</p>
+          <h1>进入赛事观测站</h1>
+          <p>管理作品、选票、讨论与最终宇宙点亮。</p>
         </div>
         <form id="adminLoginForm">
           <label class="admin-field"><span>后台密码</span><input id="adminPasswordInput" type="password" autocomplete="current-password" required /></label>
@@ -29,152 +28,184 @@
       </section>
     </main>
 
-    <div class="admin-app" id="adminApp" hidden>
-      <header class="admin-topbar">
+    <div class="admin-app admin-workspace" id="adminApp" hidden>
+      <button class="admin-sidebar-scrim" id="adminSidebarScrim" type="button" aria-label="关闭导航" tabindex="-1"></button>
+      <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand-lockup admin-brand" href="/" aria-label="打开公开星图">
           <img src="/assets/suyo-studio-transparent.png" alt="SuYo Studio 溯游工作室" />
         </a>
-        <nav class="admin-nav" aria-label="后台导航">
-          <a href="#overview">总览</a>
-          <a href="#gamesAdmin">作品</a>
-          <a href="#settingsAdmin">活动</a>
-          <a href="#ballotsAdmin">选票</a>
-          <a href="#commentsAdmin">回声</a>
-          <a href="#resultsAdmin">点亮</a>
-          <a href="#auditAdmin">审计</a>
+        <nav class="admin-side-nav" aria-label="后台导航">
+          <p>赛事运行</p>
+          <a href="#overview" data-admin-view="overview"><span>总览</span></a>
+          <a href="#gamesAdmin" data-admin-view="gamesAdmin"><span>参展作品</span><b id="navGamesBadge">0</b></a>
+          <a href="#ballotsAdmin" data-admin-view="ballotsAdmin"><span>投票复核</span><b id="navBallotsBadge">0</b></a>
+          <a href="#commentsAdmin" data-admin-view="commentsAdmin"><span>社区管理</span><b id="navCommentsBadge">0</b></a>
+          <p>赛事控制</p>
+          <a href="#settingsAdmin" data-admin-view="settingsAdmin"><span>活动设置</span></a>
+          <a href="#resultsAdmin" data-admin-view="resultsAdmin"><span>宇宙点亮</span></a>
+          <a href="#auditAdmin" data-admin-view="auditAdmin"><span>审计记录</span></a>
         </nav>
-        <div class="admin-top-actions">
-          <a class="button button-outline" href="/" target="_blank" rel="noreferrer">查看星图</a>
-          <button class="text-action" id="adminLogout" type="button">退出</button>
+        <div class="admin-sidebar-foot">
+          <a class="button button-outline" href="/" target="_blank" rel="noreferrer">查看公开星图</a>
+          <button class="text-action" id="adminLogout" type="button">退出登录</button>
         </div>
-      </header>
+      </aside>
 
-      <main class="admin-main">
-        <section class="admin-overview" id="overview">
-          <div class="admin-section-title">
-            <div><p class="admin-kicker">EVENT OVERVIEW</p><h1 id="adminEventTitle">溯造 MiniGame 游戏开发大赛</h1></div>
-            <div class="event-state" id="adminVotingState">读取中</div>
-          </div>
-          <div class="admin-stats" aria-label="活动统计">
-            <article><span>全部作品</span><strong id="gamesStat">0</strong></article>
-            <article><span>公开作品</span><strong id="publishedStat">0</strong></article>
-            <article><span>投票人数</span><strong id="votersStat">0</strong></article>
-            <article><span>有效票数</span><strong id="votesStat">0</strong></article>
-          </div>
-          <div class="admin-ranking" id="adminRanking"></div>
-        </section>
+      <div class="admin-stage">
+        <header class="admin-utility">
+          <button class="admin-menu-toggle" id="adminMenuToggle" type="button" aria-controls="adminSidebar" aria-expanded="false">导航</button>
+          <div><strong id="adminViewTitle">赛事总览</strong><span id="adminViewHint">当前活动运行状态与待处理事项</span></div>
+          <div class="admin-utility-actions"><span id="adminVotingState">读取中</span><a href="/" target="_blank" rel="noreferrer">前台</a></div>
+        </header>
 
-        <section class="admin-block" id="gamesAdmin">
-          <div class="admin-block-head">
-            <div><h2>参展作品</h2><p>上传封面、演示视频、创作手记与制作成员。系统会为每款作品生成固定天体坐标。</p></div>
-            <div class="admin-block-actions"><button class="button button-outline" id="exportAllGames" type="button">导出全部作品</button><button class="button button-outline" id="resetGameForm" type="button">新建作品</button></div>
-          </div>
-          <div class="game-admin-layout">
-            <form class="game-editor" id="gameForm">
-              <input type="hidden" id="gameId" name="id" />
-              <input type="hidden" id="creatorsJson" name="creatorsJson" />
-              <div class="editor-title"><strong id="editorTitle">新建作品</strong><span id="editorHint">保存后立即写入服务器</span></div>
-              <div class="admin-field-grid">
-                <label class="admin-field"><span>游戏名称</span><input name="title" maxlength="60" required /></label>
-                <label class="admin-field"><span>制作团队</span><input name="team" maxlength="60" required /></label>
-                <label class="admin-field field-wide"><span>一句话介绍</span><input name="shortDescription" maxlength="120" required /></label>
-                <label class="admin-field field-wide"><span>游戏简介</span><textarea name="description" rows="5" maxlength="1200"></textarea></label>
-                <label class="admin-field field-wide"><span>创作手记</span><textarea name="creationNote" rows="5" maxlength="600" placeholder="记录灵感来源、取舍和这次 48 小时旅程"></textarea></label>
-                <div class="creator-editor field-wide">
-                  <div class="creator-editor-head"><div><strong>制作人员卫星</strong><span>参赛者权限与自投限制以邮箱为准；最多 12 人</span></div><button class="text-action" id="addCreator" type="button">添加成员</button></div>
-                  <div class="creator-rows" id="creatorRows"></div>
-                </div>
-                <label class="admin-field"><span>标签</span><input name="tags" maxlength="120" placeholder="解谜，叙事，动作" /></label>
-                <label class="admin-field"><span>排序</span><input name="order" type="number" value="100" /></label>
-                <section class="planet-signature field-wide" aria-labelledby="planetSignatureTitle">
-                  <div><strong id="planetSignatureTitle">天体签名</strong><span>坐标对所有访问者固定，形态由作品素材、作品编号与种子共同生成</span></div>
-                  <dl><div><dt>固定坐标</dt><dd id="planetCoordinate">保存作品后生成</dd></div><div><dt>形态种子</dt><dd id="planetSeed">保存作品后生成</dd></div></dl>
-                  <button class="text-action" id="regeneratePlanet" type="button" disabled>重新生成天体</button>
-                </section>
-                <label class="admin-field"><span>作品文件</span><input name="gameFile" type="file" accept=".zip,.7z,.rar,application/zip,application/x-7z-compressed,application/vnd.rar" /><small>支持 ZIP、7Z、RAR，单个文件不超过 2GB。未选择时保留当前文件。</small></label>
-                <label class="admin-field"><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
-                <label class="admin-field"><span>公开演示地址</span><input name="videoExternalUrl" type="url" placeholder="直链或哔哩哔哩、腾讯视频、YouTube 页面" /></label>
-                <label class="admin-field"><span>本地封面</span><input name="cover" type="file" accept="image/*" /></label>
-                <label class="admin-field field-wide"><span>本地演示视频</span><input name="video" type="file" accept="video/*" /></label>
-              </div>
-              <div class="editor-switches">
-                <label><input name="published" type="checkbox" checked /> 对外发布</label>
-                <label><input name="featured" type="checkbox" /> 设为主推</label>
-                <label><input name="isOfficial" type="checkbox" /> 官方作品（不参与投票与评奖）</label>
-              </div>
-              <div class="editor-actions">
-                <button class="button button-solid" id="saveGame" type="submit">保存作品</button>
-                <button class="button button-outline" id="cancelEdit" type="button" hidden>取消编辑</button>
-              </div>
-              <p class="form-message" id="gameMessage" role="status"></p>
-            </form>
-            <div class="admin-game-list" id="adminGameList" aria-live="polite"></div>
-          </div>
-        </section>
-
-        <section class="admin-block" id="settingsAdmin">
-          <div class="admin-block-head"><div><h2>活动设置</h2><p>截止后系统只锁定选票并隐藏结果，不会自动公开。</p></div></div>
-          <form class="settings-form" id="settingsForm">
-            <label class="admin-field"><span>活动名称</span><input name="eventTitle" maxlength="80" required /></label>
-            <label class="admin-field"><span>Game Jam 主题</span><input name="theme" maxlength="40" required /></label>
-            <label class="admin-field field-wide"><span>活动标语</span><input name="slogan" maxlength="80" required /></label>
-            <label class="admin-field"><span>参展提交截止</span><input name="submissionEndAt" type="datetime-local" step="1" required /></label>
-            <label class="admin-field"><span>投票开始</span><input name="startAt" type="datetime-local" step="1" required /></label>
-            <label class="admin-field"><span>投票结束</span><input name="endAt" type="datetime-local" step="1" required /></label>
-            <label class="admin-field field-wide"><span>星图种子</span><input name="eventSeed" maxlength="80" placeholder="用于固定所有作品的宇宙坐标" /></label>
-            <div class="settings-notice field-wide"><strong>三个时间彼此独立</strong><span>参展截止只判断补交，投票截止只锁定选票。宇宙点亮没有预设时间，由管理员完成复核后手动触发；一旦点亮也会立即停止投票。</span></div>
-            <button class="button button-solid" type="submit">保存活动设置</button>
-            <p class="form-message" id="settingsMessage" role="status"></p>
-          </form>
-        </section>
-
-        <section class="admin-block" id="ballotsAdmin">
-          <div class="admin-block-head">
-            <div><h2>有效选票</h2><p>截止发布前可删除违规投票者。每次删除都必须填写原因并写入审计记录。</p></div>
-            <div class="admin-block-actions">
-              <label class="admin-search"><span>搜索投票者</span><input id="voterSearch" type="search" placeholder="姓名、队伍或邮箱" /></label>
-              <button class="button button-outline" id="exportVotes" type="button">导出选票</button>
-              <button class="button button-outline" id="exportAudit" type="button">导出审计</button>
+        <main class="admin-main admin-view-host">
+          <section class="admin-view admin-overview" id="overview" data-admin-view-panel>
+            <div class="admin-page-head">
+              <div><p class="admin-kicker">赛事总览</p><h1 id="adminEventTitle">溯造 MiniGame 游戏开发大赛</h1></div>
+              <p>先处理异常和待办，再进入具体模块。</p>
             </div>
-          </div>
-          <div class="ballot-list" id="ballotList"></div>
-        </section>
+            <div class="admin-stats" aria-label="活动统计">
+              <article><span>全部作品</span><strong id="gamesStat">0</strong></article>
+              <article><span>公开作品</span><strong id="publishedStat">0</strong></article>
+              <article><span>投票人数</span><strong id="votersStat">0</strong></article>
+              <article><span>有效票数</span><strong id="votesStat">0</strong></article>
+            </div>
+            <div class="admin-overview-grid">
+              <section class="admin-action-queue"><div class="admin-subhead"><div><h2>待处理事项</h2><p>按风险和时效排序</p></div></div><div id="adminActionQueue"></div></section>
+              <section class="admin-ranking" id="adminRanking"></section>
+            </div>
+          </section>
 
-        <section class="admin-block" id="commentsAdmin">
-          <div class="admin-block-head">
-            <div><p class="admin-kicker">ECHO MODERATION</p><h2>观测回声管理</h2><p>管理评论开放状态、建设性反馈标签、违规内容与禁言。所有操作必须填写原因并永久进入审计。</p></div>
-            <div class="admin-block-actions"><button class="button button-outline" id="toggleGlobalComments" type="button">暂停全站评论</button><button class="button button-outline" id="refreshComments" type="button">刷新回声</button></div>
-          </div>
-          <div class="comment-admin-layout">
-            <section class="comment-admin-controls">
-              <div class="comment-admin-subsection"><h3>作品讨论状态</h3><div id="commentGameSettings"></div></div>
-              <form class="comment-tag-form" id="commentTagForm"><h3>新增统一标签</h3><label class="admin-field"><span>标签分组</span><input name="group" maxlength="20" placeholder="玩法 / 视听 / 操作" required /></label><label class="admin-field"><span>标签文字</span><input name="label" maxlength="8" required /></label><button class="button button-outline" type="submit">加入词表</button></form>
-              <div class="comment-admin-subsection"><h3>统一标签词表</h3><div id="commentTagList"></div></div>
+          <section class="admin-view admin-block" id="gamesAdmin" data-admin-view-panel hidden>
+            <div class="admin-page-head admin-page-head-actions">
+              <div><p class="admin-kicker">参展管理</p><h1>参展作品</h1><p>从列表定位作品，仅在需要时打开编辑器。</p></div>
+              <div class="admin-block-actions"><button class="button button-outline" id="exportAllGames" type="button">导出全部</button><button class="button button-solid" id="resetGameForm" type="button">新建作品</button></div>
+            </div>
+            <div class="admin-toolbar">
+              <label class="admin-search"><span>搜索作品</span><input id="gameSearch" type="search" placeholder="游戏名、队伍或负责人邮箱" /></label>
+              <label class="admin-search"><span>状态</span><select id="gameStatusFilter"><option value="">全部状态</option><option value="published">已公开</option><option value="draft">草稿</option><option value="withdrawn">已撤回</option><option value="late">补交</option><option value="ownerless">待绑定负责人</option></select></label>
+            </div>
+            <div class="admin-game-list admin-data-list" id="adminGameList" aria-live="polite"></div>
+          </section>
+
+          <section class="admin-view admin-block" id="ballotsAdmin" data-admin-view-panel hidden>
+            <div class="admin-page-head admin-page-head-actions">
+              <div><p class="admin-kicker">投票复核</p><h1>有效选票</h1><p>优先查看风险身份，违规操作统一称为“作废选票”。</p></div>
+              <div class="admin-block-actions"><button class="button button-outline" id="exportVotes" type="button">导出选票</button><button class="button button-outline" id="exportAudit" type="button">导出审计</button></div>
+            </div>
+            <div class="admin-toolbar">
+              <label class="admin-search"><span>搜索投票者</span><input id="voterSearch" type="search" placeholder="姓名、队伍或邮箱" /></label>
+              <label class="admin-search"><span>风险</span><select id="ballotStatusFilter"><option value="">全部选票</option><option value="review">建议复核</option><option value="normal">暂无异常</option></select></label>
+            </div>
+            <div class="ballot-list admin-data-list" id="ballotList"></div>
+          </section>
+
+          <section class="admin-view admin-block" id="commentsAdmin" data-admin-view-panel hidden>
+            <div class="admin-page-head admin-page-head-actions">
+              <div><p class="admin-kicker">社区管理</p><h1>观测回声</h1><p>内容、作品开关、标签词表和禁言分区处理。</p></div>
+              <div class="admin-block-actions"><button class="button button-outline" id="toggleGlobalComments" type="button">暂停全站评论</button><button class="button button-outline" id="refreshComments" type="button">刷新</button></div>
+            </div>
+            <nav class="admin-tabs" aria-label="社区管理分区">
+              <button type="button" data-comment-admin-tab="stream" aria-current="page">内容流</button>
+              <button type="button" data-comment-admin-tab="settings">作品设置</button>
+              <button type="button" data-comment-admin-tab="tags">标签词表</button>
+              <button type="button" data-comment-admin-tab="mutes">禁言账户</button>
+            </nav>
+            <section class="admin-tab-pane" data-comment-admin-pane="stream">
+              <div class="admin-toolbar"><label class="admin-search"><span>筛选回声</span><input id="commentAdminSearch" type="search" placeholder="作品、姓名、邮箱或内容" /></label><label class="admin-search"><span>状态</span><select id="commentStatusFilter"><option value="">全部内容</option><option value="visible">公开</option><option value="hidden">已隐藏</option><option value="deleted">已删除</option></select></label></div>
+              <div class="comment-admin-stream admin-data-list" id="commentAdminList"></div>
             </section>
-            <section class="comment-admin-stream"><div class="comment-admin-filter"><label class="admin-search"><span>筛选回声</span><input id="commentAdminSearch" type="search" placeholder="作品、姓名、邮箱或内容" /></label></div><div id="commentAdminList"></div></section>
-          </div>
-        </section>
+            <section class="admin-tab-pane" data-comment-admin-pane="settings" hidden><div class="comment-admin-controls" id="commentGameSettings"></div></section>
+            <section class="admin-tab-pane" data-comment-admin-pane="tags" hidden>
+              <form class="comment-tag-form" id="commentTagForm"><div class="admin-subhead"><div><h2>统一标签词表</h2><p>停用后历史评论仍保留标签</p></div></div><div class="admin-inline-form"><label class="admin-field"><span>标签分组</span><input name="group" maxlength="20" placeholder="玩法 / 视听 / 操作" required /></label><label class="admin-field"><span>标签文字</span><input name="label" maxlength="8" required /></label><button class="button button-solid" type="submit">加入词表</button></div></form>
+              <div class="comment-admin-controls" id="commentTagList"></div>
+            </section>
+            <section class="admin-tab-pane" data-comment-admin-pane="mutes" hidden><div class="comment-admin-controls" id="commentMuteList"></div></section>
+          </section>
 
-        <section class="admin-block results-control" id="resultsAdmin">
-          <div class="admin-block-head"><div><p class="admin-kicker">COSMIC IGNITION</p><h2>宇宙点亮</h2><p>玩家之声固定为两项同等级奖。前五名构成星座，第五名同票时星座席位自动扩展。</p></div></div>
-          <div id="resultControl"></div>
-        </section>
+          <section class="admin-view admin-block" id="settingsAdmin" data-admin-view-panel hidden>
+            <div class="admin-page-head admin-page-head-actions"><div><p class="admin-kicker">赛事控制</p><h1>活动设置</h1><p>默认只读展示，避免误改关键时间。</p></div><button class="button button-solid" id="editSettings" type="button">修改设置</button></div>
+            <div class="settings-summary" id="settingsSummary"></div>
+          </section>
 
-        <section class="admin-block" id="auditAdmin">
-          <div class="admin-block-head">
-            <div><h2>完整审计记录</h2><p>永久查询作品修改、成员权限、素材元数据、作品文件前后版本、选票与管理员操作。</p></div>
-            <form class="admin-block-actions" id="auditFilterForm">
+          <section class="admin-view admin-block results-control" id="resultsAdmin" data-admin-view-panel hidden>
+            <div class="admin-page-head"><div><p class="admin-kicker">发布中心</p><h1>宇宙点亮</h1><p>完成同票裁定和现场复核后，再向全站公开结果。</p></div></div>
+            <div id="resultControl"></div>
+          </section>
+
+          <section class="admin-view admin-block" id="auditAdmin" data-admin-view-panel hidden>
+            <div class="admin-page-head"><div><p class="admin-kicker">不可变记录</p><h1>完整审计</h1><p>先筛选，再查看单条操作的完整上下文。</p></div></div>
+            <form class="admin-toolbar admin-audit-filters" id="auditFilterForm">
               <label class="admin-search"><span>作品</span><select id="auditGameFilter" name="gameId"><option value="">全部作品</option></select></label>
               <label class="admin-search"><span>邮箱</span><input name="email" type="email" placeholder="参与者邮箱" /></label>
-              <button class="button button-outline" type="submit">查询审计</button>
+              <label class="admin-search"><span>操作类型</span><select id="auditActionFilter"><option value="">全部操作</option></select></label>
+              <label class="admin-search"><span>日期</span><input id="auditDateFilter" type="date" /></label>
+              <button class="button button-outline" type="submit">应用筛选</button>
             </form>
-          </div>
-          <div class="audit-list" id="auditList"></div>
-        </section>
-      </main>
+            <div class="audit-list admin-data-list" id="auditList"></div>
+            <nav class="admin-pagination" id="auditPagination" aria-label="审计分页"><button class="button button-outline" id="auditPrevPage" type="button">上一页</button><span id="auditPageLabel">第 1 页</span><button class="button button-outline" id="auditNextPage" type="button">下一页</button></nav>
+          </section>
+        </main>
+      </div>
     </div>
 
+    <div class="admin-drawer-layer" id="gameEditorLayer" hidden>
+      <button class="admin-drawer-scrim" id="closeGameEditorBackdrop" type="button" aria-label="关闭作品编辑器"></button>
+      <aside class="admin-drawer" id="gameEditorDrawer" aria-labelledby="editorTitle">
+        <header><div><p class="admin-kicker">作品编辑器</p><h2 id="editorTitle">新建作品</h2><span id="editorHint">保存后立即写入服务器</span></div><button class="text-action" id="closeGameEditor" type="button">关闭</button></header>
+        <form class="game-editor" id="gameForm">
+          <input type="hidden" id="gameId" name="id" />
+          <input type="hidden" id="creatorsJson" name="creatorsJson" />
+          <div class="admin-field-grid">
+            <label class="admin-field"><span>游戏名称</span><input name="title" maxlength="60" required /></label>
+            <label class="admin-field"><span>制作团队</span><input name="team" maxlength="60" required /></label>
+            <label class="admin-field field-wide"><span>一句话介绍</span><input name="shortDescription" maxlength="120" required /></label>
+            <label class="admin-field field-wide"><span>游戏简介</span><textarea name="description" rows="5" maxlength="1200"></textarea></label>
+            <label class="admin-field field-wide"><span>创作手记</span><textarea name="creationNote" rows="5" maxlength="600" placeholder="记录灵感来源、取舍和这次开发旅程"></textarea></label>
+            <div class="creator-editor field-wide"><div class="creator-editor-head"><div><strong>制作人员卫星</strong><span>参赛者权限与自投限制以邮箱为准，最多 12 人</span></div><button class="text-action" id="addCreator" type="button">添加成员</button></div><div class="creator-rows" id="creatorRows"></div></div>
+            <label class="admin-field"><span>标签</span><input name="tags" maxlength="120" placeholder="解谜，叙事，动作" /></label>
+            <label class="admin-field"><span>排序</span><input name="order" type="number" value="100" /></label>
+            <section class="planet-signature field-wide" aria-labelledby="planetSignatureTitle"><div><strong id="planetSignatureTitle">天体签名</strong><span>坐标对所有访问者固定，形态由作品素材与种子共同生成</span></div><dl><div><dt>固定坐标</dt><dd id="planetCoordinate">保存作品后生成</dd></div><div><dt>形态种子</dt><dd id="planetSeed">保存作品后生成</dd></div></dl><button class="text-action" id="regeneratePlanet" type="button" disabled>重新生成天体</button></section>
+            <label class="admin-field"><span>作品文件</span><input name="gameFile" type="file" accept=".zip,.7z,.rar,application/zip,application/x-7z-compressed,application/vnd.rar" /><small>支持 ZIP、7Z、RAR，未选择时保留当前文件。</small></label>
+            <label class="admin-field"><span>外部封面地址</span><input name="coverUrl" type="url" placeholder="https://" /></label>
+            <label class="admin-field"><span>公开演示地址</span><input name="videoExternalUrl" type="url" placeholder="直链或视频页面链接" /></label>
+            <label class="admin-field"><span>本地封面</span><input name="cover" type="file" accept="image/*" /></label>
+            <label class="admin-field field-wide"><span>本地演示视频</span><input name="video" type="file" accept="video/*" /></label>
+          </div>
+          <div class="editor-switches"><label><input name="published" type="checkbox" checked /> 对外发布</label><label><input name="featured" type="checkbox" /> 设为主推</label><label><input name="isOfficial" type="checkbox" /> 官方作品，不参与投票与评奖</label></div>
+          <div class="editor-actions"><button class="button button-solid" id="saveGame" type="submit">保存作品</button><button class="button button-outline" id="cancelEdit" type="button">取消</button></div>
+          <p class="form-message" id="gameMessage" role="status"></p>
+        </form>
+      </aside>
+    </div>
+
+    <div class="admin-drawer-layer" id="settingsEditorLayer" hidden>
+      <button class="admin-drawer-scrim" id="closeSettingsBackdrop" type="button" aria-label="关闭活动设置"></button>
+      <aside class="admin-drawer admin-drawer-compact" aria-labelledby="settingsEditorTitle"><header><div><p class="admin-kicker">赛事控制</p><h2 id="settingsEditorTitle">修改活动设置</h2><span>时间修改会写入审计记录</span></div><button class="text-action" id="closeSettingsEditor" type="button">关闭</button></header>
+        <form class="settings-form" id="settingsForm">
+          <label class="admin-field"><span>活动名称</span><input name="eventTitle" maxlength="80" required /></label><label class="admin-field"><span>Game Jam 主题</span><input name="theme" maxlength="40" required /></label><label class="admin-field field-wide"><span>活动标语</span><input name="slogan" maxlength="80" required /></label><label class="admin-field"><span>参展提交截止</span><input name="submissionEndAt" type="datetime-local" step="1" required /></label><label class="admin-field"><span>投票开始</span><input name="startAt" type="datetime-local" step="1" required /></label><label class="admin-field"><span>投票结束</span><input name="endAt" type="datetime-local" step="1" required /></label><label class="admin-field field-wide"><span>星图种子</span><input name="eventSeed" maxlength="80" placeholder="用于固定所有作品的宇宙坐标" /></label>
+          <div class="settings-notice field-wide"><strong>三个时间彼此独立</strong><span>参展截止判断补交，投票截止锁定选票，宇宙点亮由管理员手动触发。</span></div>
+          <div class="editor-actions"><button class="button button-solid" type="submit">保存活动设置</button><button class="button button-outline" id="cancelSettingsEdit" type="button">取消</button></div><p class="form-message" id="settingsMessage" role="status"></p>
+        </form>
+      </aside>
+    </div>
+
+    <div class="admin-drawer-layer" id="adminInspectorLayer" hidden>
+      <button class="admin-drawer-scrim" id="closeAdminInspectorBackdrop" type="button" aria-label="关闭详情"></button>
+      <aside class="admin-drawer admin-inspector" aria-labelledby="adminInspectorTitle"><header><div><p class="admin-kicker">详情核验</p><h2 id="adminInspectorTitle">记录详情</h2></div><button class="text-action" id="closeAdminInspector" type="button">关闭</button></header><div id="adminInspectorContent"></div></aside>
+    </div>
+
+    <dialog class="admin-action-dialog" id="adminActionDialog">
+      <form method="dialog" id="adminActionForm">
+        <p class="admin-kicker" id="adminActionEyebrow">操作确认</p><h2 id="adminActionTitle">确认操作</h2><p id="adminActionDescription"></p><div class="admin-action-consequence" id="adminActionConsequence" hidden></div>
+        <label class="admin-field" id="adminActionValueField" hidden><span id="adminActionValueLabel">确认文本</span><input id="adminActionValue" /></label>
+        <label class="admin-field" id="adminActionReasonField" hidden><span>操作原因</span><textarea id="adminActionReason" rows="3" maxlength="300" placeholder="该原因会永久写入审计记录"></textarea></label>
+        <p class="form-message" id="adminActionMessage" role="alert"></p>
+        <div class="editor-actions"><button class="button button-outline" id="adminActionCancel" type="button">取消</button><button class="button button-solid" id="adminActionConfirm" type="submit">确认</button></div>
+      </form>
+    </dialog>
+
     <div class="toast" id="adminToast" role="status" hidden></div>
-    <script src="/admin.js?v=20260716echo1" defer></script>
+    <script src="/admin.js?v=20260716admin2" defer></script>
   </body>
 </html>
