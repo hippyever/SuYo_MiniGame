@@ -1770,6 +1770,21 @@ canvas:focus-visible {
   gap: 16px;
 }
 
+.auth-profile-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  animation: auth-profile-reveal 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes auth-profile-reveal {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .field-wide {
   grid-column: 1 / -1;
 }
@@ -3559,6 +3574,7 @@ canvas:focus-visible {
   }
 
   .identity-grid,
+  .auth-profile-fields,
   .ballot-orbits {
     grid-template-columns: 1fr;
   }

@@ -32,9 +32,10 @@ async function login(jar, name, email) {
     jar,
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(identity)
+    body: JSON.stringify({ email })
   });
   assert.equal(result.response.status, 200);
+  assert.equal(result.body.invitedIdentityDetected, false);
   result = await request("/api/auth/verify", {
     jar,
     method: "POST",
@@ -133,16 +134,16 @@ assert.equal(status.eligible, true);
 result = await vote(sharedDevice, games[3].id, "eligibility-first-vote");
 assert.equal(result.response.status, 200);
 
-for (const [index, email] of ["eligibility-two@example.com", "eligibility-three@example.com"].entries()) {
-  await login(sharedDevice, `公共玩家${index + 2}`, email);
+for (const email of ["eligibility-two@example.com", "eligibility-three@example.com"]) {
+  await login(sharedDevice, "同名玩家", email);
   await download(sharedDevice, games[0].id);
   await download(sharedDevice, games[1].id);
   await download(sharedDevice, games[2].id);
 }
 await new Promise((resolve) => setTimeout(resolve, 1200));
-for (const [index, email] of ["eligibility-two@example.com", "eligibility-three@example.com"].entries()) {
-  await login(sharedDevice, `公共玩家${index + 2}`, email);
-  result = await vote(sharedDevice, games[3].id, `device-switch-vote-${index}`);
+for (const email of ["eligibility-two@example.com", "eligibility-three@example.com"]) {
+  await login(sharedDevice, "同名玩家", email);
+  result = await vote(sharedDevice, games[3].id, `device-switch-vote-${email.split("@")[0]}`);
   assert.equal(result.response.status, 200);
 }
 

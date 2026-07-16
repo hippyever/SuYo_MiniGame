@@ -11,7 +11,7 @@
     <meta property="og:image" content="/assets/suyo-studio.png" />
     <title>溯造 MiniGame 游戏开发大赛</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/observatory.css?v=20260716vote1" />
+    <link rel="stylesheet" href="/observatory.css?v=20260716vote2" />
   </head>
   <body class="observatory-body">
     <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
@@ -331,16 +331,18 @@
           <div><span>投票身份</span><h2 id="authTitle">登录投票身份</h2></div>
           <button class="plain-action" id="closeAuth" type="button">关闭</button>
         </header>
-        <p class="dialog-intro" id="authIntro">浏览和下载无需登录。开发者可直接投票，其他玩家登录后下载 3 款参赛作品，并从首次下载起等待 30 分钟即可投票。</p>
+        <p class="dialog-intro" id="authIntro">浏览和下载无需登录。开发者可直接投票，其他玩家登录后下载 3 款参赛作品，并从首次下载起等待 15 分钟即可投票。</p>
         <div class="identity-grid">
-          <label class="field-block"><span>姓名</span><input id="authName" name="name" maxlength="30" autocomplete="name" required /></label>
-          <label class="field-block"><span>队伍</span><input id="authTeam" name="team" maxlength="50" autocomplete="organization" required /></label>
           <label class="field-block field-wide"><span>邮箱</span><input id="authEmail" name="email" type="email" maxlength="180" autocomplete="email" required /></label>
-          <label class="field-block code-field"><span>6 位验证码</span><input id="authCode" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" /></label>
+          <label class="field-block code-field"><span>6 位验证码</span><input id="authCode" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" disabled /></label>
           <button class="secondary-action code-action" id="sendCodeButton" type="button">发送验证码</button>
+          <div class="auth-profile-fields" id="authProfileFields" hidden>
+            <label class="field-block"><span>姓名</span><input id="authName" name="name" maxlength="30" autocomplete="name" required /></label>
+            <label class="field-block"><span>所属组织 / 队伍</span><input id="authTeam" name="team" maxlength="50" autocomplete="organization" placeholder="没有所属组织可填写“个人”" required /></label>
+          </div>
         </div>
         <p class="privacy-note">邮箱仅用于本次投票验证，不会公开展示。</p>
-        <button class="primary-action full-action" id="verifyButton" type="submit">验证并登录</button>
+        <button class="primary-action full-action" id="verifyButton" type="submit" hidden>验证并登录</button>
         <p class="form-message" id="authMessage" role="status"></p>
       </form>
     </dialog>
@@ -450,6 +452,6 @@
     <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
     <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
     <script src="/markdown.js?v=20260715a" defer></script>
-    <script src="/app.js?v=20260716vote1" defer></script>
+    <script src="/app.js?v=20260716vote2" defer></script>
   </body>
 </html>

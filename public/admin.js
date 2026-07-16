@@ -33,6 +33,7 @@ const ADMIN_VIEWS = {
 
 const AUDIT_LABELS = {
   ballot_updated: "用户修改选票", ballot_invalidated_by_team_membership: "队伍关系使选票失效",
+  participant_identity_updated: "用户更新投票身份", participant_identity_synchronized_by_team_membership: "队伍关系同步投票身份",
   session_verified: "用户完成邮箱验证", voter_removed: "管理员作废违规票",
   results_adjudicated: "管理员完成同票裁定", results_published: "管理员点亮宇宙", results_withdrawn: "管理员撤回公开结果",
   planet_regenerated: "管理员重新生成天体", game_created: "创建作品", game_updated: "修改作品", game_submitted: "提交参展",

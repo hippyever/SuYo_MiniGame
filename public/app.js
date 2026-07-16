@@ -61,6 +61,7 @@ const state = {
   creatorOrbitStartedAt: 0,
   pendingVoteId: "",
   pendingInvitedIdentity: false,
+  pendingAuthCodeSent: false,
   pendingBallotOpen: false,
   pendingReplacementId: "",
   pendingBallotRetry: null,
@@ -1762,7 +1763,8 @@ function eligibilityCopy() {
   if (eligibility.eligible) return { status: "eligible", title: "投票资格已获得", body: `已记录 ${eligibility.qualifyingDownloadCount} 款不同参赛作品。现在可以为任意非官方作品投票。` };
   if (eligibility.downloadsRemaining > 0) return { status: "progress", title: `还需下载 ${eligibility.downloadsRemaining} 款参赛作品`, body: `当前已记录 ${eligibility.qualifyingDownloadCount}/${eligibility.requiredDownloads} 款。登录状态下点击本站下载即可计入，同一作品重复下载只计一款。` };
   const minutes = Math.max(1, Math.ceil((eligibility.waitRemainingSeconds || 0) / 60));
-  return { status: "waiting", title: `试玩等待中，约 ${minutes} 分钟后可投票`, body: "已经完成 3 款不同作品的下载要求。资格从首次下载起满 30 分钟后自动生效。" };
+  const requiredMinutes = Math.max(1, Math.ceil((eligibility.requiredWaitSeconds || 15 * 60) / 60));
+  return { status: "waiting", title: `试玩等待中，约 ${minutes} 分钟后可投票`, body: `已经完成 3 款不同作品的下载要求。资格从首次下载起满 ${requiredMinutes} 分钟后自动生效。` };
 }
 
 function renderEligibility() {
@@ -2680,7 +2682,7 @@ function profileValues() {
 function validateProfile() {
   const identity = profileValues();
   if (!identity.name || !identity.team || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(identity.email)) {
-    setMessage($("#authMessage"), "请填写姓名、队伍和有效邮箱。", true);
+    setMessage($("#authMessage"), "请填写姓名、所属组织 / 队伍和有效邮箱。", true);
     return null;
   }
   return identity;
@@ -2692,20 +2694,33 @@ function codeRequestIdentity() {
     setMessage($("#authMessage"), "请先填写有效邮箱。", true);
     return null;
   }
-  return identity;
+  return { email: identity.email };
+}
+
+function setAuthCodeStage(active) {
+  state.pendingAuthCodeSent = Boolean(active);
+  $("#authProfileFields").hidden = !state.pendingAuthCodeSent;
+  $("#verifyButton").hidden = !state.pendingAuthCodeSent;
+  $("#authCode").disabled = !state.pendingAuthCodeSent;
+  if (!state.pendingAuthCodeSent) $("#authCode").value = "";
 }
 
 function setInvitedIdentityMode(active) {
+  const wasInvited = state.pendingInvitedIdentity;
   state.pendingInvitedIdentity = Boolean(active);
   const form = $("#authForm");
   form.dataset.invited = String(state.pendingInvitedIdentity);
   for (const input of [$("#authName"), $("#authTeam")]) {
     input.readOnly = state.pendingInvitedIdentity;
     if (state.pendingInvitedIdentity) {
+      if (!wasInvited) input.dataset.previousValue = input.value;
       input.value = "";
       input.placeholder = "验证后同步";
     } else {
-      input.removeAttribute("placeholder");
+      if (wasInvited && !input.value) input.value = input.dataset.previousValue || "";
+      delete input.dataset.previousValue;
+      if (input.id === "authTeam") input.placeholder = "没有所属组织可填写“个人”";
+      else input.removeAttribute("placeholder");
     }
   }
   $("#authMessage").dataset.identitySignal = String(state.pendingInvitedIdentity);
@@ -2717,9 +2732,10 @@ function openAuth(pendingVoteId = "") {
   $("#authTitle").textContent = pendingGame ? "验证后继续提取" : "登录投票身份";
   $("#authIntro").textContent = pendingGame
     ? `验证成功后会检查你的投票资格，再继续《${pendingGame.title}》的投票流程。`
-    : "浏览和下载无需登录。开发者可直接投票，其他玩家登录后下载 3 款参赛作品，并从首次下载起等待 30 分钟即可投票。";
+    : "浏览和下载无需登录。开发者可直接投票，其他玩家登录后下载 3 款参赛作品，并从首次下载起等待 15 分钟即可投票。";
   const profile = readProfile();
   setInvitedIdentityMode(false);
+  setAuthCodeStage(false);
   $("#authName").value ||= profile.name || "";
   $("#authTeam").value ||= profile.team || "";
   $("#authEmail").value ||= profile.email || "";
@@ -2759,6 +2775,7 @@ async function sendCode() {
       body: JSON.stringify(identity)
     });
     setInvitedIdentityMode(result.invitedIdentityDetected);
+    setAuthCodeStage(true);
     if (result.devCode) {
       $("#authCode").value = result.devCode;
       setMessage($("#authMessage"), result.invitedIdentityDetected ? `${result.message} 本地验证码已自动填入。` : "本地调试验证码已自动填入。" );
@@ -2778,6 +2795,7 @@ async function sendCode() {
 
 async function verifyAuth(event) {
   event.preventDefault();
+  const usedInvitedIdentity = state.pendingInvitedIdentity;
   const identity = state.pendingInvitedIdentity ? codeRequestIdentity() : validateProfile();
   const code = $("#authCode").value.trim();
   if (!identity) return;
@@ -2802,8 +2820,12 @@ async function verifyAuth(event) {
     updateDetailVoteButton();
     await refreshNotifications();
     if (!$("#commentPanel").hidden) await loadComments({ reset: true });
-    showToast(state.pendingInvitedIdentity ? "受邀身份已同步，可以继续管理作品和投票。" : "登录成功，之后可以直接修改投票。" );
+    showToast(usedInvitedIdentity ? "受邀身份已同步，可以继续管理作品和投票。" : "登录成功，之后可以直接修改投票。" );
     setInvitedIdentityMode(false);
+    setAuthCodeStage(false);
+    $("#authName").value = result.identity.name || "";
+    $("#authTeam").value = result.identity.team || "";
+    $("#authEmail").value = result.identity.email || "";
     const pending = state.pendingVoteId;
     const shouldOpenBallot = state.pendingBallotOpen;
     state.pendingVoteId = "";
@@ -4225,7 +4247,12 @@ function bindUI() {
   $("#authForm").addEventListener("submit", verifyAuth);
   $("#sendCodeButton").addEventListener("click", sendCode);
   $("#authEmail").addEventListener("input", () => {
-    if (state.pendingInvitedIdentity) setInvitedIdentityMode(false);
+    if (!state.pendingAuthCodeSent && !state.pendingInvitedIdentity) return;
+    setInvitedIdentityMode(false);
+    setAuthCodeStage(false);
+    clearInterval(state.countdownTimer);
+    $("#sendCodeButton").disabled = false;
+    $("#sendCodeButton").textContent = "发送验证码";
   });
   $("#closeBallot").addEventListener("click", closeBallotDialog);
   $("#logoutButton").addEventListener("click", logout);
@@ -4378,6 +4405,7 @@ function init() {
   $("#authName").value = profile.name || "";
   $("#authTeam").value = profile.team || "";
   $("#authEmail").value = profile.email || "";
+  setAuthCodeStage(false);
   loadApplication();
 }
 

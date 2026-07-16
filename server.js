@@ -46,7 +46,7 @@ const VIDEO_RETENTION_MS = Math.max(1, Number(process.env.VIDEO_RETENTION_DAYS |
 const GAME_FILE_RETENTION_MS = Math.max(1, Number(process.env.GAME_FILE_RETENTION_DAYS || 2)) * 24 * 60 * 60 * 1000;
 const SESSION_TTL_MS = Math.max(1, Number(process.env.SESSION_TTL_DAYS || 30)) * 24 * 60 * 60 * 1000;
 const VOTE_REQUIRED_DOWNLOADS = Math.max(1, Number(process.env.VOTE_REQUIRED_DOWNLOADS || 3));
-const VOTE_QUALIFICATION_WAIT_MS = Math.max(0, Number(process.env.VOTE_QUALIFICATION_WAIT_SECONDS || 30 * 60)) * 1000;
+const VOTE_QUALIFICATION_WAIT_MS = Math.max(0, Number(process.env.VOTE_QUALIFICATION_WAIT_SECONDS || 15 * 60)) * 1000;
 const VOTE_RAPID_DOWNLOAD_MS = Math.max(10, Number(process.env.VOTE_RAPID_DOWNLOAD_SECONDS || 120)) * 1000;
 const VOTE_JUST_QUALIFIED_MS = Math.max(10, Number(process.env.VOTE_JUST_QUALIFIED_SECONDS || 180)) * 1000;
 const DEVICE_COOKIE_NAME = "suyo_minigame_device";
@@ -806,6 +806,7 @@ function refreshVoteEligibility(store, email, { deviceId = "", now = Date.now() 
     eligible,
     source,
     requiredDownloads: VOTE_REQUIRED_DOWNLOADS,
+    requiredWaitSeconds: Math.ceil(VOTE_QUALIFICATION_WAIT_MS / 1000),
     qualifyingDownloadCount: uniqueDownloads.length,
     downloadedGameIds: uniqueDownloads.map((item) => item.gameId),
     firstDownloadAt,
@@ -821,9 +822,10 @@ function refreshVoteEligibility(store, email, { deviceId = "", now = Date.now() 
 function requireVoteEligibility(store, email, options = {}) {
   const eligibility = refreshVoteEligibility(store, email, options);
   if (!eligibility.eligible) {
+    const waitMinutes = Math.max(1, Math.ceil(VOTE_QUALIFICATION_WAIT_MS / 60000));
     const error = new Error(eligibility.downloadsRemaining
       ? `还需下载 ${eligibility.downloadsRemaining} 款不同的参赛作品，才能获得投票资格。`
-      : `已完成下载要求，请在首次下载 30 分钟后投票。`);
+      : `已完成下载要求，请在首次下载 ${waitMinutes} 分钟后投票。`);
     error.status = 403;
     error.code = "VOTING_ELIGIBILITY_REQUIRED";
     error.details = { eligibility };
@@ -844,7 +846,7 @@ function selfBlockedGameIds(store, email) {
 
 function ballotForSession(store, session) {
   if (!session) return null;
-  return store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.email === session.email && ballot.personKey === session.personKey) || null;
+  return store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && normalizeEmail(ballot.email) === normalizeEmail(session.email)) || null;
 }
 
 function clientIp(req) {
@@ -1068,15 +1070,13 @@ async function handleRequestCode(req, res) {
   const submittedTeam = cleanText(body.team, 50);
   const email = normalizeEmail(body.email);
   if (!isValidEmail(email)) {
-    return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写姓名、队伍和有效邮箱。" });
+    return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写有效邮箱。" });
   }
   const store = await ensureStore();
   const invitedIdentity = membershipIdentity(store, email);
   const name = invitedIdentity?.name || submittedName;
   const team = invitedIdentity?.team || submittedTeam;
-  if (!name || !team) {
-    return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写姓名、队伍和有效邮箱。" });
-  }
+  const identityPrepared = Boolean(name && team);
   const previous = store.verificationCodes[email];
   const now = Date.now();
   const sourceIp = clientIp(req);
@@ -1100,8 +1100,8 @@ async function handleRequestCode(req, res) {
   await mutateStore((current) => {
     current.verificationCodes[email] = {
       codeHash: hashCode(email, code),
-      identityKey: identityKey(name, team, email),
-      personKey: personKey(name, team),
+      identityKey: identityPrepared ? identityKey(name, team, email) : "",
+      personKey: identityPrepared ? personKey(name, team) : "",
       sentAt: now,
       expiresAt: now + OTP_TTL_MS,
       attempts: 0,
@@ -1116,7 +1116,7 @@ async function handleRequestCode(req, res) {
     };
   });
   try {
-    const delivery = await deliverCode({ email, name, code });
+    const delivery = await deliverCode({ email, name: name || "观测者", code });
     return json(res, 200, {
       ok: true,
       message: invitedIdentity ? "检测到受邀制作人员身份，验证后将同步队伍资料。" : "验证码已发送，请检查邮箱。",
@@ -1150,7 +1150,7 @@ function verifyCode(store, { name, team, email, code }) {
     error.code = "IDENTITY_REQUIRED";
     throw error;
   }
-  if (record.identityKey !== identityKey(resolvedName, resolvedTeam, email)) {
+  if (record.identityKey && record.identityKey !== identityKey(resolvedName, resolvedTeam, email)) {
     const error = new Error("身份信息已改变，请重新发送验证码。");
     error.status = 400;
     error.code = "IDENTITY_CHANGED";
@@ -1318,7 +1318,7 @@ async function handleAuthVerify(req, res) {
   const email = normalizeEmail(body.email);
   const code = cleanText(body.code, 6);
   if (!isValidEmail(email) || !/^\d{6}$/.test(code)) {
-    return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请完整填写身份信息和 6 位验证码。" });
+    return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请填写有效邮箱和 6 位验证码。" });
   }
   const token = crypto.randomBytes(32).toString("base64url");
   const existingDeviceToken = cookieValue(req, DEVICE_COOKIE_NAME);
@@ -1332,18 +1332,20 @@ async function handleAuthVerify(req, res) {
     const team = verification.resolvedTeam;
     const key = personKey(name, team);
     const byEmail = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.email === email);
-    const byPerson = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.personKey === key && ballot.email !== email);
-    if (byPerson && !verification.usesMembershipIdentity) {
-      const error = new Error("该姓名与队伍已经使用其他邮箱投票，请使用首次投票邮箱登录。");
-      error.status = 409;
-      error.code = "PERSON_ALREADY_VOTED";
-      throw error;
-    }
-    if (byEmail && byEmail.personKey !== key && !verification.usesMembershipIdentity) {
-      const error = new Error("该邮箱已绑定其他姓名或队伍。");
-      error.status = 409;
-      error.code = "EMAIL_ALREADY_USED";
-      throw error;
+    if (byEmail && (byEmail.name !== name || byEmail.team !== team || byEmail.personKey !== key)) {
+      const beforeIdentity = { name: byEmail.name, team: byEmail.team, personKey: byEmail.personKey };
+      byEmail.name = name;
+      byEmail.team = team;
+      byEmail.personKey = key;
+      addAudit(store, {
+        action: "participant_identity_updated",
+        actorType: "voter",
+        actorId: byEmail.id,
+        voterId: byEmail.id,
+        voterEmail: email,
+        before: beforeIdentity,
+        after: { name, team, personKey: key }
+      });
     }
     const now = Date.now();
     for (const [keyHash, session] of Object.entries(store.sessions)) {
@@ -1468,13 +1470,6 @@ async function handleBallot(req, res) {
       error.code = "LOGIN_REQUIRED";
       throw error;
     }
-    const byPerson = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.personKey === record.session.personKey && ballot.email !== record.session.email);
-    if (byPerson) {
-      const error = new Error("该姓名与队伍已经使用其他邮箱投票。");
-      error.status = 409;
-      error.code = "PERSON_ALREADY_VOTED";
-      throw error;
-    }
     let ballot = ballotForSession(store, record.session);
     if (usesOperation) {
       const previousOperation = store.ballotOperations[operationId];
@@ -1485,7 +1480,10 @@ async function handleBallot(req, res) {
           error.code = "OPERATION_EVENT_CONFLICT";
           throw error;
         }
-        if (previousOperation.personKey !== record.session.personKey) {
+        const operationOwnedBySession = previousOperation.voterEmail
+          ? normalizeEmail(previousOperation.voterEmail) === normalizeEmail(record.session.email)
+          : previousOperation.personKey === record.session.personKey;
+        if (!operationOwnedBySession) {
           const error = new Error("选票操作标识已被占用。");
           error.status = 409;
           error.code = "OPERATION_ID_CONFLICT";
@@ -1598,6 +1596,7 @@ async function handleBallot(req, res) {
     if (usesOperation) {
       store.ballotOperations[operationId] = {
         eventKey: voteEventKey(store),
+        voterEmail: normalizeEmail(record.session.email),
         personKey: record.session.personKey,
         before,
         after: [...gameIds],
@@ -1669,21 +1668,11 @@ async function handleVote(req, res) {
       const team = record.resolvedTeam;
       const key = personKey(name, team);
       const byEmail = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.email === email);
-      const byPerson = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.personKey === key && ballot.email !== email);
-      if (byPerson && !record.usesMembershipIdentity) {
-        const error = new Error("该姓名与队伍已经提交过选票。如需修改，请使用首次投票邮箱。" );
-        error.status = 409;
-        error.code = "PERSON_ALREADY_VOTED";
-        throw error;
-      }
       const nowIso = new Date().toISOString();
       if (byEmail) {
-        if (byEmail.personKey !== key && !record.usesMembershipIdentity) {
-          const error = new Error("该邮箱已绑定其他姓名或队伍。" );
-          error.status = 409;
-          error.code = "EMAIL_ALREADY_USED";
-          throw error;
-        }
+        byEmail.name = name;
+        byEmail.team = team;
+        byEmail.personKey = key;
         byEmail.gameIds = gameIds;
         byEmail.version = Number(byEmail.version || 1) + 1;
         byEmail.updatedAt = nowIso;

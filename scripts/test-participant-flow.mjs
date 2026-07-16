@@ -29,6 +29,13 @@ async function login(name, team, email) {
   return verified.cookie;
 }
 
+async function qualifyForVoting(cookie, gameId) {
+  const downloaded = await request(`/api/games/${encodeURIComponent(gameId)}/download`, { cookie });
+  assert.ok([200, 302].includes(downloaded.response.status));
+  const status = await request("/api/vote-eligibility", { cookie });
+  assert.equal(status.body.eligibility.eligible, true);
+}
+
 async function createDraft(cookie, title) {
   const form = new FormData();
   form.set("title", title);
@@ -260,6 +267,7 @@ assert.equal(result.response.status, 409);
 assert.equal(result.body.error, "SELF_VOTE");
 
 const voterCookie = await login("观测者", "访客队", voterEmail);
+await qualifyForVoting(voterCookie, game.id);
 result = await request("/api/ballot", {
   cookie: voterCookie,
   method: "PUT",
@@ -363,6 +371,7 @@ secondGame = result.body.game;
 result = await request(`/api/participant/games/${secondGame.id}/submit`, { cookie: memberCookie, method: "POST" });
 assert.equal(result.response.status, 200);
 secondGame = result.body.game;
+await qualifyForVoting(voterCookie, game.id);
 
 for (const [id, operationId] of [[game.id, "final-vote-one"], [secondGame.id, "final-vote-two"]]) {
   result = await request("/api/ballot", {
@@ -479,6 +488,7 @@ assert.equal(result.response.status, 200);
 assert.deepEqual(result.body.identity, { name: "岚序", team: "潮汐新组", email: invitedLoginEmail });
 
 const closingVoterCookie = await login("远光", "观测访客", "closing-voter-flow@example.com");
+await qualifyForVoting(closingVoterCookie, secondGame.id);
 result = await request("/api/ballot", {
   cookie: closingVoterCookie,
   method: "PUT",
