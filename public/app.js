@@ -30,6 +30,7 @@ const state = {
   games: [],
   gameById: new Map(),
   session: { authenticated: false, identity: null },
+  eligibility: null,
   ballot: { gameIds: [], version: 0, updatedAt: null },
   visited: new Set(),
   resolved: new Set(),
@@ -83,6 +84,7 @@ const state = {
   ritualArrival: null,
   ritualResizeFrame: null,
   deepLinkId: new URLSearchParams(location.search).get("game") || "",
+  lastDownloadTriggeredAt: 0,
   launched: false,
   lowMode: false,
   lowModeManual: false,
@@ -1752,6 +1754,46 @@ function isSelfGame(game) {
   return (state.session.selfBlockedGameIds || []).includes(game.id);
 }
 
+function eligibilityCopy() {
+  const eligibility = state.eligibility;
+  if (!state.session.authenticated) return { status: "login", title: "登录后开始累计试玩记录", body: "未登录也可以正常下载，但不会计入投票资格。" };
+  if (!eligibility) return { status: "loading", title: "正在核对投票资格", body: "下载和开发者身份记录正在同步。" };
+  if (eligibility.eligible && eligibility.source === "developer") return { status: "eligible", title: "开发者投票资格已激活", body: "你是当前已提交作品的负责人或有效队员，可以直接投票。该资格获得后会保留。" };
+  if (eligibility.eligible) return { status: "eligible", title: "投票资格已获得", body: `已记录 ${eligibility.qualifyingDownloadCount} 款不同参赛作品。现在可以为任意非官方作品投票。` };
+  if (eligibility.downloadsRemaining > 0) return { status: "progress", title: `还需下载 ${eligibility.downloadsRemaining} 款参赛作品`, body: `当前已记录 ${eligibility.qualifyingDownloadCount}/${eligibility.requiredDownloads} 款。登录状态下点击本站下载即可计入，同一作品重复下载只计一款。` };
+  const minutes = Math.max(1, Math.ceil((eligibility.waitRemainingSeconds || 0) / 60));
+  return { status: "waiting", title: `试玩等待中，约 ${minutes} 分钟后可投票`, body: "已经完成 3 款不同作品的下载要求。资格从首次下载起满 30 分钟后自动生效。" };
+}
+
+function renderEligibility() {
+  const panel = $("#voteEligibilityPanel");
+  const copy = eligibilityCopy();
+  if (panel) {
+    panel.dataset.status = copy.status;
+    panel.innerHTML = `<strong>${escapeHTML(copy.title)}</strong><p>${escapeHTML(copy.body)}</p>`;
+  }
+  const ceremonyPanel = $("#ceremonyEligibility");
+  if (ceremonyPanel) {
+    ceremonyPanel.hidden = !state.session.authenticated;
+    ceremonyPanel.dataset.status = copy.status;
+    ceremonyPanel.innerHTML = `<strong>${escapeHTML(copy.title)}</strong><p>${escapeHTML(copy.body)}</p>`;
+  }
+}
+
+async function refreshVoteEligibility({ activity = "", gameId = "" } = {}) {
+  if (!state.session.authenticated) return;
+  try {
+    const result = await fetchJSON(activity ? "/api/vote-activity" : "/api/vote-eligibility", activity ? {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: activity, gameId })
+    } : undefined);
+    state.eligibility = result.eligibility;
+    renderEligibility();
+    updateDetailVoteButton();
+  } catch {}
+}
+
 function updateDetailVoteButton() {
   const button = $("#detailVote");
   const game = state.gameById.get(state.detailId);
@@ -1774,6 +1816,11 @@ function updateDetailVoteButton() {
   if (isSelfGame(game)) {
     button.disabled = true;
     button.textContent = "不能为自己的作品投票";
+    return;
+  }
+  if (state.session.authenticated && !state.eligibility?.eligible) {
+    button.disabled = false;
+    button.textContent = state.eligibility?.downloadsRemaining > 0 ? "先完成试玩要求" : "等待投票资格生效";
     return;
   }
   button.disabled = false;
@@ -2376,7 +2423,13 @@ function populateDetail(game) {
   if (!videoLink.hidden) videoLink.href = game.videoUrl;
   const download = $("#detailDownload");
   download.hidden = !game.downloadUrl;
-  if (game.downloadUrl) download.href = game.downloadUrl;
+  if (game.downloadUrl) {
+    const downloadUrl = new URL(game.downloadUrl, location.origin);
+    const pageSource = new URLSearchParams(location.search).get("ref") || new URLSearchParams(location.search).get("utm_source");
+    if (pageSource) downloadUrl.searchParams.set("source", pageSource);
+    else if (state.deepLinkId) downloadUrl.searchParams.set("source", `game-share:${state.deepLinkId}`);
+    download.href = `${downloadUrl.pathname}${downloadUrl.search}`;
+  }
 
   const orbit = $("#creatorOrbit");
   orbit.innerHTML = creatorNodes(game);
@@ -2406,6 +2459,7 @@ function openDetail(id) {
   updatePreviewVideo();
   markVisited(id);
   populateDetail(game);
+  if (state.session.authenticated) refreshVoteEligibility({ activity: "game_detail", gameId: id });
   $("#planetDetail").scrollTop = 0;
   $(".detail-content", $("#planetDetail")).scrollTop = 0;
 
@@ -2491,6 +2545,7 @@ async function shareCurrentGame() {
   if (!game) return;
   const url = new URL(location.origin + location.pathname);
   url.searchParams.set("game", game.id);
+  url.searchParams.set("ref", `share:${game.id}`);
   const data = { title: `${game.title} / 溯造 MiniGame`, text: `${game.team}制作的《${game.title}》`, url: url.toString() };
   try {
     if (navigator.share) await navigator.share(data);
@@ -2661,8 +2716,8 @@ function openAuth(pendingVoteId = "") {
   const pendingGame = state.gameById.get(pendingVoteId);
   $("#authTitle").textContent = pendingGame ? "验证后继续提取" : "登录投票身份";
   $("#authIntro").textContent = pendingGame
-    ? `验证成功后将返回《${pendingGame.title}》的可能性核心提取仪式。`
-    : "浏览无需登录。验证一次后，即可在投票截止前随时修改选票。";
+    ? `验证成功后会检查你的投票资格，再继续《${pendingGame.title}》的投票流程。`
+    : "浏览和下载无需登录。开发者可直接投票，其他玩家登录后下载 3 款参赛作品，并从首次下载起等待 30 分钟即可投票。";
   const profile = readProfile();
   setInvitedIdentityMode(false);
   $("#authName").value ||= profile.name || "";
@@ -2738,6 +2793,7 @@ async function verifyAuth(event) {
     });
     state.session = { authenticated: true, identity: result.identity, selfBlockedGameIds: result.selfBlockedGameIds || [] };
     state.ballot = result.ballot || { gameIds: [], version: 0 };
+    state.eligibility = result.eligibility || null;
     saveProfile(result.identity);
     closeDialog($("#authDialog"));
     $("#authCode").value = "";
@@ -2768,6 +2824,7 @@ async function logout() {
   } catch {}
   state.session = { authenticated: false, identity: null, selfBlockedGameIds: [] };
   state.ballot = { gameIds: [], version: 0, updatedAt: null };
+  state.eligibility = null;
   state.pendingReplacementId = "";
   state.pendingBallotRetry = null;
   closeVoteCeremony({ immediate: true });
@@ -2945,6 +3002,7 @@ function setRitualPhase(phase, { title, status, eyebrow } = {}) {
   state.ritualPhase = phase;
   const ceremony = $("#voteCeremony");
   ceremony.dataset.phase = phase;
+  $("#ceremonySteps").hidden = phase === "personal";
   const orbitStep = ["floating", "replacement", "submitting", "handoff", "orbiting", "success", "personal"].includes(phase);
   $$('[data-ritual-step]', $("#ceremonySteps")).forEach((step) => {
     const current = step.dataset.ritualStep === (orbitStep ? "orbit" : "extract");
@@ -3210,6 +3268,7 @@ function openPersonalSystem() {
   $("#ceremonyCoordinate").textContent = "PRIVATE OBSERVATORY";
   showVoteCeremony();
   renderPersonalSystem();
+  renderEligibility();
   setRitualPhase("personal", {
     title: "我的可能性星系",
     status: state.ballot.gameIds.length ? "靠近或选择核心，查看对应作品并管理当前选票。" : "你的轨道仍然安静。探索作品，并带回你相信的可能性。",
@@ -3387,7 +3446,10 @@ async function syncBallot() {
   try {
     const result = await fetchJSON("/api/ballot");
     state.ballot = result.ballot;
+    if (result.eligibility) state.eligibility = result.eligibility;
+    if (result.eligibility) state.eligibility = result.eligibility;
     updateAccountUI();
+    renderEligibility();
     updateDetailVoteButton();
     if (!$("#voteCeremony").hidden && state.ritualPhase === "personal") renderPersonalSystem();
   } catch {}
@@ -3418,9 +3480,11 @@ async function submitRitualOperation({ addGameId = "", removeGameId = "", mode =
     }, Date.now() + 15000);
     const before = [...state.ballot.gameIds];
     state.ballot = result.ballot;
+    if (result.eligibility) state.eligibility = result.eligibility;
     state.lastBallotChange = { added: addGameId || null, removed: removeGameId || null, at: Date.now() };
     state.ritualOperationId = "";
     updateAccountUI();
+    renderEligibility();
     updateDetailVoteButton();
     if (isReturn) {
       ritualVibrate(72);
@@ -3614,6 +3678,10 @@ async function toggleVote(id) {
   if (!state.session.authenticated) return openAuth(id);
   if (state.ballot.gameIds.includes(id)) return openReturnVoteConfirm(id);
   if (isSelfGame(game)) return showToast(`你参与了《${game.title}》的制作，不能为自己的作品投票。`);
+  if (!state.eligibility?.eligible) {
+    openPersonalSystem();
+    return showToast(eligibilityCopy().title);
+  }
   openVoteCeremony(id);
 }
 
@@ -3680,6 +3748,7 @@ function renderBallot() {
   $$('[data-replace-vote]', $("#ballotOrbits")).forEach((button) => button.addEventListener("click", () => replaceVote(button.dataset.replaceVote)));
   const identity = state.session.identity;
   $("#ballotIdentity").textContent = `${identity.name} / ${identity.team} / ${identity.email}`;
+  renderEligibility();
   const unexplored = Math.max(0, state.games.length - state.visited.size);
   $("#unexploredNote").textContent = unexplored
     ? `仍有 ${unexplored} 款作品尚未在这台设备上查看。你仍然可以保留或修改当前选票。`
@@ -4056,6 +4125,16 @@ function bindUI() {
     setTimeout(() => $(`[data-comment-card="${CSS.escape(target.dataset.notificationComment)}"]`)?.scrollIntoView({ behavior: state.reducedMotion ? "auto" : "smooth", block: "center" }), 300);
   });
   $("#detailVote").addEventListener("click", () => state.detailId && toggleVote(state.detailId));
+  $("#detailDownload").addEventListener("click", () => {
+    state.lastDownloadTriggeredAt = Date.now();
+    if (!state.session.authenticated) {
+      showToast("下载会正常开始。登录后触发的下载才计入投票资格。");
+      return;
+    }
+    showToast("下载已触发，正在同步试玩记录。");
+    setTimeout(() => refreshVoteEligibility(), 900);
+    setTimeout(() => refreshVoteEligibility(), 2600);
+  });
   $("#searchButton").addEventListener("click", openSearch);
   $("#navigationHelp").addEventListener("click", toggleNavigationHelp);
   $("#searchInput").addEventListener("input", (event) => renderSearch(event.target.value));
@@ -4238,6 +4317,9 @@ function bindUI() {
       startPersonalOrbit();
       if (["personal", "success"].includes(state.ritualPhase)) syncBallot();
     }
+    if (!document.hidden && state.session.authenticated && Date.now() - state.lastDownloadTriggeredAt < 10 * 60 * 1000) {
+      refreshVoteEligibility({ activity: "page_return", gameId: state.detailId });
+    }
   });
   window.addEventListener("online", syncBallot);
   window.visualViewport?.addEventListener("resize", refreshCeremonyGeometry, { passive: true });
@@ -4266,10 +4348,12 @@ async function loadApplication() {
       ? { authenticated: true, identity: session.identity, selfBlockedGameIds: session.selfBlockedGameIds || [] }
       : { authenticated: false, identity: null, selfBlockedGameIds: [] };
     state.ballot = session.ballot || { gameIds: [], version: 0, updatedAt: null };
+    state.eligibility = session.eligibility || null;
     state.games.forEach(coverImage);
     initializeLocalState();
     updateHeader();
     updateAccountUI();
+    renderEligibility();
     renderAccessibleIndex();
     renderResults();
     updateEmptyObservatory();
@@ -4287,6 +4371,9 @@ function init() {
   installDetailScrollCue();
   bindUI();
   setupCanvas();
+  setInterval(() => {
+    if (state.session.authenticated && !state.eligibility?.eligible && state.eligibility?.downloadsRemaining === 0) refreshVoteEligibility();
+  }, 30000);
   const profile = readProfile();
   $("#authName").value = profile.name || "";
   $("#authTeam").value = profile.team || "";

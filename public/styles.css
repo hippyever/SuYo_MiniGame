@@ -2483,6 +2483,7 @@ body.admin-body {
 .ballot-row > p { margin: 0; color: var(--ink); }
 .ballot-row > time { color: var(--muted); font-size: .7rem; }
 .admin-risk-state { display: grid; gap: 2px; color: var(--muted); font-size: .7rem; }
+.ballot-row.high-risk .admin-risk-state b { color: var(--danger); border-left-color: var(--danger); }
 
 .admin-tabs {
   display: flex;

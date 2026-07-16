@@ -36,6 +36,7 @@ function gameForm({ title, isOfficial = false }) {
   form.set("description", "用于验证官方作品规则的测试内容。");
   form.set("published", "on");
   if (isOfficial) form.set("isOfficial", "on");
+  form.set("gameFile", new Blob([`official rules package: ${title}`], { type: "application/zip" }), `${title}.zip`);
   return form;
 }
 
@@ -87,6 +88,9 @@ result = await request("/api/admin/games", {
 });
 assert.equal(result.response.status, 201);
 const contestGame = result.body.game;
+
+result = await request(`/api/games/${encodeURIComponent(contestGame.id)}/download`, { cookie: voterCookie });
+assert.equal(result.response.status, 200);
 
 result = await request("/api/ballot", {
   cookie: voterCookie,

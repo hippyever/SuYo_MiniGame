@@ -241,6 +241,7 @@ function renderRanking() {
 }
 
 function ballotNeedsReview(ballot) {
+  if (ballot.risk?.level && ballot.risk.level !== "normal") return true;
   const voter = normalizedName(ballot.name);
   return ballot.gameIds.some((id) => (gameById(id)?.creators || []).some((creator) => normalizedName(creator.name) === voter));
 }
@@ -329,7 +330,10 @@ function renderBallots() {
   const ballots = adminState.dashboard.ballots.filter((ballot) => {
     const text = [ballot.name, ballot.team, ballot.email, ballot.emailSearch, ...ballot.games].join(" ").toLowerCase();
     const suspected = ballotNeedsReview(ballot);
-    const matchesRisk = !adminState.ballotStatus || (adminState.ballotStatus === "review" && suspected) || (adminState.ballotStatus === "normal" && !suspected);
+    const matchesRisk = !adminState.ballotStatus
+      || (adminState.ballotStatus === "review" && suspected)
+      || (adminState.ballotStatus === "high" && ballot.risk?.level === "high")
+      || (adminState.ballotStatus === "normal" && !suspected);
     return (!needle || text.includes(needle)) && matchesRisk;
   });
   if (!ballots.length) {
@@ -341,12 +345,13 @@ function renderBallots() {
   const canReview = adminState.dashboard.votingState !== "published";
   list.innerHTML = ballots.map((ballot) => {
     const suspected = ballotNeedsReview(ballot);
-    const audit = ballot.audit || [];
+    const reasons = ballot.risk?.reasons || [];
+    const firstReason = reasons[0]?.label || (suspected ? "姓名匹配作者" : "");
     return `
-    <article class="ballot-row admin-data-row ${suspected ? "suspected-self-vote" : ""}">
+    <article class="ballot-row admin-data-row ${suspected ? "suspected-self-vote" : ""} ${ballot.risk?.level === "high" ? "high-risk" : ""}">
       <div class="admin-row-main"><strong>${escapeHTML(ballot.name)}</strong><span>${escapeHTML(ballot.team)}</span><small>${escapeHTML(ballot.email)}</small></div>
       <p>${ballot.games.map(escapeHTML).join(" / ")}</p>
-      <span class="admin-risk-state">${suspected ? `<b>建议复核</b><small>姓名匹配作者</small>` : `<span>暂无异常</span>`}</span>
+      <span class="admin-risk-state">${suspected ? `<b>${ballot.risk?.level === "high" ? "高风险" : "建议复核"}</b><small>${escapeHTML(firstReason)}${reasons.length > 1 ? ` 等 ${reasons.length} 项` : ""}</small>` : `<span>暂无异常</span>`}</span>
       <time>${formatDate(ballot.updatedAt)}</time>
       <div class="admin-row-actions"><button class="button button-outline" data-inspect-ballot="${escapeHTML(ballot.id)}" type="button">查看详情</button>${canReview ? `<button class="text-action danger-action" data-delete-voter="${escapeHTML(ballot.id)}" type="button">作废选票</button>` : ""}</div>
     </article>
@@ -359,7 +364,12 @@ function inspectBallot(id) {
   const ballot = adminState.dashboard.ballots.find((item) => item.id === id);
   if (!ballot) return;
   const audit = ballot.audit || [];
-  openInspector(`选票：${ballot.name}`, `<dl class="admin-inspector-facts"><div><dt>邮箱</dt><dd>${escapeHTML(ballot.email)}</dd></div><div><dt>队伍</dt><dd>${escapeHTML(ballot.team)}</dd></div><div><dt>当前选择</dt><dd>${ballot.games.map(escapeHTML).join(" / ") || "空选票"}</dd></div><div><dt>更新时间</dt><dd>${formatDate(ballot.updatedAt)}</dd></div></dl><div class="admin-inspector-log"><h3>选票变化 ${audit.length}</h3>${audit.length ? `<ol>${audit.map((item) => { const before = (item.before || []).map((gameId) => gameById(gameId)?.title || gameId).join(" / ") || "空选票"; const after = (item.after || []).map((gameId) => gameById(gameId)?.title || gameId).join(" / ") || "空选票"; return `<li><time>${formatDate(item.createdAt)}</time><span>${escapeHTML(before)} → ${escapeHTML(after)}</span></li>`; }).join("")}</ol>` : `<div class="admin-empty">暂无选票变化记录</div>`}</div>`);
+  const eligibility = ballot.eligibility || {};
+  const reasons = ballot.risk?.reasons || [];
+  const sourceLabels = { developer: "开发者豁免", downloads: "下载试玩", legacy: "历史选票保留" };
+  const riskMarkup = `<div class="admin-inspector-log"><h3>风险信号 ${reasons.length}</h3>${reasons.length ? `<ol>${reasons.map((reason) => `<li><strong>${escapeHTML(reason.label)}</strong><span>${escapeHTML(reason.detail)}</span></li>`).join("")}</ol>` : `<div class="admin-empty">没有命中风险信号</div>`}</div>`;
+  const downloadMarkup = `<div class="admin-inspector-log"><h3>资格记录 ${eligibility.downloads?.length || 0}</h3><p>${escapeHTML(sourceLabels[eligibility.source] || "尚未获得资格")}，浏览返回 ${eligibility.activityCount || 0} 次</p>${eligibility.downloads?.length ? `<ol>${eligibility.downloads.map((item) => `<li><time>${formatDate(item.firstDownloadedAt)}</time><span>${escapeHTML(item.title)}${item.count > 1 ? `，触发 ${item.count} 次` : ""}${item.source ? `，来源 ${escapeHTML(item.source)}` : ""}</span></li>`).join("")}</ol>` : `<div class="admin-empty">没有计入资格的下载</div>`}</div>`;
+  openInspector(`选票：${ballot.name}`, `<dl class="admin-inspector-facts"><div><dt>邮箱</dt><dd>${escapeHTML(ballot.email)}</dd></div><div><dt>队伍</dt><dd>${escapeHTML(ballot.team)}</dd></div><div><dt>当前选择</dt><dd>${ballot.games.map(escapeHTML).join(" / ") || "空选票"}</dd></div><div><dt>更新时间</dt><dd>${formatDate(ballot.updatedAt)}</dd></div></dl>${riskMarkup}${downloadMarkup}<div class="admin-inspector-log"><h3>选票变化 ${audit.length}</h3>${audit.length ? `<ol>${audit.map((item) => { const before = (item.before || []).map((gameId) => gameById(gameId)?.title || gameId).join(" / ") || "空选票"; const after = (item.after || []).map((gameId) => gameById(gameId)?.title || gameId).join(" / ") || "空选票"; return `<li><time>${formatDate(item.createdAt)}</time><span>${escapeHTML(before)} → ${escapeHTML(after)}</span></li>`; }).join("")}</ol>` : `<div class="admin-empty">暂无选票变化记录</div>`}</div>`);
 }
 
 function fillSettings() {

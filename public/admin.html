@@ -7,7 +7,7 @@
     <meta name="robots" content="noindex,nofollow" />
     <title>溯造 MiniGame | 轨道控制台</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/styles.css?v=20260716contrast1" />
+    <link rel="stylesheet" href="/styles.css?v=20260716vote1" />
   </head>
   <body class="admin-body">
     <main class="admin-login" id="adminLogin">
@@ -95,7 +95,7 @@
             </div>
             <div class="admin-toolbar">
               <label class="admin-search"><span>搜索投票者</span><input id="voterSearch" type="search" placeholder="姓名、队伍或邮箱" /></label>
-              <label class="admin-search"><span>风险</span><select id="ballotStatusFilter"><option value="">全部选票</option><option value="review">建议复核</option><option value="normal">暂无异常</option></select></label>
+              <label class="admin-search"><span>风险</span><select id="ballotStatusFilter"><option value="">全部选票</option><option value="high">高风险</option><option value="review">建议复核</option><option value="normal">暂无异常</option></select></label>
             </div>
             <div class="ballot-list admin-data-list" id="ballotList"></div>
           </section>
@@ -206,6 +206,6 @@
     </dialog>
 
     <div class="toast" id="adminToast" role="status" hidden></div>
-    <script src="/admin.js?v=20260716admin2" defer></script>
+    <script src="/admin.js?v=20260716vote1" defer></script>
   </body>
 </html>

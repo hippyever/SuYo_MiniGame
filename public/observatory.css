@@ -1820,6 +1820,60 @@ canvas:focus-visible {
   min-height: 1.2em;
 }
 
+.vote-eligibility {
+  display: grid;
+  gap: 5px;
+  border-left: 2px solid var(--line);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+
+.vote-eligibility strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.vote-eligibility p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.vote-eligibility[data-status="eligible"] {
+  border-left-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 7%, transparent);
+}
+
+.vote-eligibility[data-status="waiting"] {
+  border-left-color: var(--line-strong);
+}
+
+.ceremony-eligibility {
+  display: grid;
+  gap: 5px;
+  border-left: 2px solid var(--line-strong);
+  padding: 10px 12px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.ceremony-eligibility strong {
+  color: var(--ink);
+  font-size: 0.76rem;
+}
+
+.ceremony-eligibility p {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.55;
+}
+
+.ceremony-eligibility[data-status="eligible"] {
+  border-left-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 7%, transparent);
+}
+
 .ballot-orbits {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

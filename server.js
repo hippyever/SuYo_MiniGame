@@ -45,6 +45,11 @@ const UPLOAD_TOTAL_BYTES_PER_SEC = Math.max(0, Number(process.env.UPLOAD_TOTAL_M
 const VIDEO_RETENTION_MS = Math.max(1, Number(process.env.VIDEO_RETENTION_DAYS || 7)) * 24 * 60 * 60 * 1000;
 const GAME_FILE_RETENTION_MS = Math.max(1, Number(process.env.GAME_FILE_RETENTION_DAYS || 2)) * 24 * 60 * 60 * 1000;
 const SESSION_TTL_MS = Math.max(1, Number(process.env.SESSION_TTL_DAYS || 30)) * 24 * 60 * 60 * 1000;
+const VOTE_REQUIRED_DOWNLOADS = Math.max(1, Number(process.env.VOTE_REQUIRED_DOWNLOADS || 3));
+const VOTE_QUALIFICATION_WAIT_MS = Math.max(0, Number(process.env.VOTE_QUALIFICATION_WAIT_SECONDS || 30 * 60)) * 1000;
+const VOTE_RAPID_DOWNLOAD_MS = Math.max(10, Number(process.env.VOTE_RAPID_DOWNLOAD_SECONDS || 120)) * 1000;
+const VOTE_JUST_QUALIFIED_MS = Math.max(10, Number(process.env.VOTE_JUST_QUALIFIED_SECONDS || 180)) * 1000;
+const DEVICE_COOKIE_NAME = "suyo_minigame_device";
 const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true"
   || (process.env.SESSION_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
 const ALLOW_DEV_OTP = process.env.ALLOW_DEV_OTP === "true" || (process.env.ALLOW_DEV_OTP !== "false" && process.env.NODE_ENV !== "production");
@@ -401,13 +406,14 @@ function ensureGameCoordinates(store) {
 
 function createEmptyStore() {
   return {
-    version: 9,
+    version: 10,
     createdAt: new Date().toISOString(),
     games: [],
     ballots: [],
     ballotOperations: {},
     verificationCodes: {},
     sessions: {},
+    voteEligibility: {},
     emailVerifications: {},
     audit: [],
     retiredAssets: [],
@@ -436,8 +442,9 @@ function createEmptyStore() {
 
 function migrateStore(store) {
   const empty = createEmptyStore();
+  const previousVersion = Number(store.version || 0);
   const defaultDemoById = new Map(empty.games.map((game) => [game.id, game]));
-  store.version = 9;
+  store.version = 10;
   store.games = (Array.isArray(store.games) ? store.games : empty.games).map((game) => {
     const status = gameStatus(game);
     const legacyVideo = cleanAssetUrl(game.videoUrl);
@@ -515,6 +522,36 @@ function migrateStore(store) {
   if (typeof store.settings.resultsPublished !== "boolean") store.settings.resultsPublished = store.settings.resultsVisibility === "always";
   store.settings.winnerGameIds = Array.isArray(store.settings.winnerGameIds) ? store.settings.winnerGameIds : [];
   store.settings.constellationGameIds = Array.isArray(store.settings.constellationGameIds) ? store.settings.constellationGameIds : [];
+  store.voteEligibility = store.voteEligibility && typeof store.voteEligibility === "object" && !Array.isArray(store.voteEligibility)
+    ? store.voteEligibility
+    : {};
+  const currentEventKey = cleanText(store.settings.eventSeed, 80);
+  store.voteEligibility[currentEventKey] = store.voteEligibility[currentEventKey] && typeof store.voteEligibility[currentEventKey] === "object"
+    ? store.voteEligibility[currentEventKey]
+    : {};
+  for (const ballot of store.ballots) {
+    const email = normalizeEmail(ballot.email);
+    if (!email) continue;
+    if (previousVersion < 10 && !ballot.eventKey) ballot.eventKey = currentEventKey;
+    const existing = store.voteEligibility[currentEventKey][email];
+    if (previousVersion < 10 && !existing) {
+      store.voteEligibility[currentEventKey][email] = {
+        email,
+        eventKey: currentEventKey,
+        downloads: [],
+        activities: [],
+        deviceIds: [],
+        legacyQualifiedAt: cleanText(ballot.createdAt, 60) || new Date().toISOString(),
+        createdAt: cleanText(ballot.createdAt, 60) || new Date().toISOString(),
+        updatedAt: cleanText(ballot.updatedAt, 60) || new Date().toISOString()
+      };
+    }
+  }
+  if (previousVersion < 10) {
+    for (const operation of Object.values(store.ballotOperations)) {
+      if (operation && !operation.eventKey) operation.eventKey = currentEventKey;
+    }
+  }
   ensureGameCoordinates(store);
   return store;
 }
@@ -665,6 +702,19 @@ function sessionCookie(token, maxAge = Math.floor(SESSION_TTL_MS / 1000)) {
   return `suyo_minigame_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.max(0, maxAge)}${secure}`;
 }
 
+function deviceCookie(token, maxAge = Math.floor(365 * 24 * 60 * 60)) {
+  const secure = SESSION_COOKIE_SECURE ? "; Secure" : "";
+  return `${DEVICE_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.max(0, maxAge)}${secure}`;
+}
+
+function deviceIdFromToken(token) {
+  return token ? crypto.createHash("sha256").update(String(token)).digest("hex").slice(0, 32) : "";
+}
+
+function requestDeviceId(req) {
+  return deviceIdFromToken(cookieValue(req, DEVICE_COOKIE_NAME));
+}
+
 function sessionRecord(store, req) {
   const token = cookieValue(req, "suyo_minigame_session");
   if (!token) return null;
@@ -672,6 +722,114 @@ function sessionRecord(store, req) {
   const session = store.sessions[key];
   if (!session || Date.now() >= Number(session.expiresAt || 0)) return null;
   return { key, session };
+}
+
+function voteEventKey(store) {
+  return cleanText(store.settings?.eventSeed, 80) || "default-event";
+}
+
+function eligibilityBucket(store) {
+  store.voteEligibility ||= {};
+  const eventKey = voteEventKey(store);
+  store.voteEligibility[eventKey] ||= {};
+  return { eventKey, records: store.voteEligibility[eventKey] };
+}
+
+function eligibilityRecord(store, email, { create = true } = {}) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  const { eventKey, records } = eligibilityBucket(store);
+  let record = records[normalized];
+  if (!record && create) {
+    const now = new Date().toISOString();
+    record = records[normalized] = {
+      email: normalized,
+      eventKey,
+      downloads: [],
+      activities: [],
+      deviceIds: [],
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+  if (!record) return null;
+  record.downloads = Array.isArray(record.downloads) ? record.downloads : [];
+  record.activities = Array.isArray(record.activities) ? record.activities : [];
+  record.deviceIds = [...new Set((Array.isArray(record.deviceIds) ? record.deviceIds : []).map((id) => cleanText(id, 64)).filter(Boolean))];
+  return record;
+}
+
+function currentSubmittedDeveloper(store, email) {
+  return store.games.some((game) => gameStatus(game) === "submitted" && Boolean(participantRole(game, email)));
+}
+
+function refreshVoteEligibility(store, email, { deviceId = "", now = Date.now() } = {}) {
+  const record = eligibilityRecord(store, email);
+  const nowIso = new Date(now).toISOString();
+  if (deviceId && !record.deviceIds.includes(deviceId)) record.deviceIds.push(deviceId);
+  if (!record.developerQualifiedAt && currentSubmittedDeveloper(store, email)) {
+    record.developerQualifiedAt = nowIso;
+    record.updatedAt = nowIso;
+    addAudit(store, {
+      action: "vote_eligibility_granted",
+      actorType: "system",
+      actorId: "developer-rule",
+      voterEmail: normalizeEmail(email),
+      source: "developer"
+    });
+  }
+  const uniqueDownloads = [...new Map(record.downloads.map((item) => [item.gameId, item])).values()]
+    .sort((a, b) => Date.parse(a.firstDownloadedAt || 0) - Date.parse(b.firstDownloadedAt || 0));
+  record.downloads = uniqueDownloads;
+  const firstDownloadAt = uniqueDownloads[0]?.firstDownloadedAt || null;
+  const eligibleAtMs = firstDownloadAt ? Date.parse(firstDownloadAt) + VOTE_QUALIFICATION_WAIT_MS : NaN;
+  if (!record.downloadQualifiedAt && uniqueDownloads.length >= VOTE_REQUIRED_DOWNLOADS && Number.isFinite(eligibleAtMs) && now >= eligibleAtMs) {
+    record.downloadQualifiedAt = nowIso;
+    record.updatedAt = nowIso;
+    addAudit(store, {
+      action: "vote_eligibility_granted",
+      actorType: "system",
+      actorId: "download-rule",
+      voterEmail: normalizeEmail(email),
+      source: "downloads",
+      downloadGameIds: uniqueDownloads.map((item) => item.gameId)
+    });
+  }
+  const source = record.developerQualifiedAt ? "developer"
+    : record.downloadQualifiedAt ? "downloads"
+      : record.legacyQualifiedAt ? "legacy" : "";
+  const eligible = Boolean(source);
+  const waitRemainingMs = uniqueDownloads.length >= VOTE_REQUIRED_DOWNLOADS && Number.isFinite(eligibleAtMs)
+    ? Math.max(0, eligibleAtMs - now)
+    : 0;
+  return {
+    eligible,
+    source,
+    requiredDownloads: VOTE_REQUIRED_DOWNLOADS,
+    qualifyingDownloadCount: uniqueDownloads.length,
+    downloadedGameIds: uniqueDownloads.map((item) => item.gameId),
+    firstDownloadAt,
+    eligibleAt: Number.isFinite(eligibleAtMs) ? new Date(eligibleAtMs).toISOString() : null,
+    waitRemainingSeconds: Math.ceil(waitRemainingMs / 1000),
+    downloadsRemaining: Math.max(0, VOTE_REQUIRED_DOWNLOADS - uniqueDownloads.length),
+    developerQualifiedAt: record.developerQualifiedAt || null,
+    downloadQualifiedAt: record.downloadQualifiedAt || null,
+    legacyQualifiedAt: record.legacyQualifiedAt || null
+  };
+}
+
+function requireVoteEligibility(store, email, options = {}) {
+  const eligibility = refreshVoteEligibility(store, email, options);
+  if (!eligibility.eligible) {
+    const error = new Error(eligibility.downloadsRemaining
+      ? `还需下载 ${eligibility.downloadsRemaining} 款不同的参赛作品，才能获得投票资格。`
+      : `已完成下载要求，请在首次下载 30 分钟后投票。`);
+    error.status = 403;
+    error.code = "VOTING_ELIGIBILITY_REQUIRED";
+    error.details = { eligibility };
+    throw error;
+  }
+  return eligibility;
 }
 
 function publicIdentity(session) {
@@ -686,7 +844,7 @@ function selfBlockedGameIds(store, email) {
 
 function ballotForSession(store, session) {
   if (!session) return null;
-  return store.ballots.find((ballot) => ballot.email === session.email && ballot.personKey === session.personKey) || null;
+  return store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.email === session.email && ballot.personKey === session.personKey) || null;
 }
 
 function clientIp(req) {
@@ -738,7 +896,8 @@ function votingState(settings, now = Date.now()) {
 }
 
 function activeBallots(store) {
-  return store.ballots.filter((ballot) => Array.isArray(ballot.gameIds) && ballot.gameIds.length > 0);
+  const eventKey = voteEventKey(store);
+  return store.ballots.filter((ballot) => ballot.eventKey === eventKey && Array.isArray(ballot.gameIds) && ballot.gameIds.length > 0);
 }
 
 function voteCounts(store) {
@@ -1023,7 +1182,7 @@ function addAudit(store, event) {
 function invalidateBallotsForGame(store, gameId, action) {
   const now = new Date().toISOString();
   let invalidated = 0;
-  for (const ballot of store.ballots) {
+  for (const ballot of activeBallots(store)) {
     if (!ballot.gameIds.includes(gameId)) continue;
     const before = [...ballot.gameIds];
     ballot.gameIds = before.filter((id) => id !== gameId);
@@ -1066,7 +1225,7 @@ function synchronizeMembershipIdentity(store, identity, actor = {}) {
   const email = normalizeEmail(identity.email);
   const now = new Date().toISOString();
   const nextPersonKey = personKey(identity.name, identity.team);
-  const ballot = store.ballots.find((item) => normalizeEmail(item.email) === email) || null;
+  const ballot = store.ballots.find((item) => item.eventKey === voteEventKey(store) && normalizeEmail(item.email) === email) || null;
   const beforeIdentity = ballot
     ? { name: ballot.name, team: ballot.team, personKey: ballot.personKey }
     : Object.values(store.sessions).find((session) => normalizeEmail(session.email) === email)
@@ -1162,6 +1321,9 @@ async function handleAuthVerify(req, res) {
     return json(res, 400, { ok: false, error: "IDENTITY_REQUIRED", message: "请完整填写身份信息和 6 位验证码。" });
   }
   const token = crypto.randomBytes(32).toString("base64url");
+  const existingDeviceToken = cookieValue(req, DEVICE_COOKIE_NAME);
+  const deviceToken = existingDeviceToken || crypto.randomBytes(24).toString("base64url");
+  const deviceId = deviceIdFromToken(deviceToken);
   const result = await mutateStore((store) => {
     const currentMembershipIdentity = membershipIdentity(store, email);
     if (currentMembershipIdentity) synchronizeMembershipIdentity(store, currentMembershipIdentity);
@@ -1169,8 +1331,8 @@ async function handleAuthVerify(req, res) {
     const name = verification.resolvedName;
     const team = verification.resolvedTeam;
     const key = personKey(name, team);
-    const byEmail = store.ballots.find((ballot) => ballot.email === email);
-    const byPerson = store.ballots.find((ballot) => ballot.personKey === key && ballot.email !== email);
+    const byEmail = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.email === email);
+    const byPerson = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.personKey === key && ballot.email !== email);
     if (byPerson && !verification.usesMembershipIdentity) {
       const error = new Error("该姓名与队伍已经使用其他邮箱投票，请使用首次投票邮箱登录。");
       error.status = 409;
@@ -1196,7 +1358,8 @@ async function handleAuthVerify(req, res) {
       createdAt: new Date(now).toISOString(),
       expiresAt: now + SESSION_TTL_MS,
       ip: clientIp(req),
-      userAgent: cleanText(req.headers["user-agent"], 300)
+      userAgent: cleanText(req.headers["user-agent"], 300),
+      deviceId
     };
     store.sessions[sessionHash(token)] = session;
     const emailVerification = recordEmailVerification(store, email, session.createdAt);
@@ -1215,17 +1378,19 @@ async function handleAuthVerify(req, res) {
       });
     }
     delete store.verificationCodes[email];
+    const eligibility = refreshVoteEligibility(store, email, { deviceId, now });
     addAudit(store, { action: "session_verified", actorType: "voter", actorId: session.id, voterEmail: email });
-    return { session, ballot: ballotPayload(byEmail), selfBlockedGameIds: selfBlockedGameIds(store, email) };
+    return { session, ballot: ballotPayload(byEmail), selfBlockedGameIds: selfBlockedGameIds(store, email), eligibility };
   });
   return json(res, 200, {
     ok: true,
     authenticated: true,
     identity: publicIdentity(result.session),
     ballot: result.ballot,
+    eligibility: result.eligibility,
     selfBlockedGameIds: result.selfBlockedGameIds,
     message: "身份验证成功。"
-  }, { "set-cookie": sessionCookie(token) });
+  }, { "set-cookie": [sessionCookie(token), deviceCookie(deviceToken)] });
 }
 
 async function handlePublicSession(req, res) {
@@ -1234,26 +1399,46 @@ async function handlePublicSession(req, res) {
     if (token) await mutateStore((store) => { delete store.sessions[sessionHash(token)]; });
     return json(res, 200, { ok: true, authenticated: false, message: "已退出登录。" }, { "set-cookie": sessionCookie("", 0) });
   }
-  const store = await ensureStore();
-  const record = sessionRecord(store, req);
-  if (!record) {
+  const initialStore = await ensureStore();
+  const initialRecord = sessionRecord(initialStore, req);
+  if (!initialRecord) {
     return json(res, 200, { ok: true, authenticated: false, ballot: ballotPayload(null) }, { "set-cookie": sessionCookie("", 0) });
   }
+  const result = await mutateStore((store) => {
+    const record = sessionRecord(store, req);
+    if (!record) return null;
+    const deviceId = record.session.deviceId || requestDeviceId(req);
+    if (deviceId && !record.session.deviceId) record.session.deviceId = deviceId;
+    return {
+      session: record.session,
+      ballot: ballotPayload(ballotForSession(store, record.session)),
+      selfBlockedGameIds: selfBlockedGameIds(store, record.session.email),
+      eligibility: refreshVoteEligibility(store, record.session.email, { deviceId })
+    };
+  });
+  if (!result) return json(res, 200, { ok: true, authenticated: false, ballot: ballotPayload(null) });
   return json(res, 200, {
     ok: true,
     authenticated: true,
-    identity: publicIdentity(record.session),
-    ballot: ballotPayload(ballotForSession(store, record.session)),
-    selfBlockedGameIds: selfBlockedGameIds(store, record.session.email)
+    identity: publicIdentity(result.session),
+    ballot: result.ballot,
+    selfBlockedGameIds: result.selfBlockedGameIds,
+    eligibility: result.eligibility
   });
 }
 
 async function handleBallot(req, res) {
   if (req.method === "GET") {
-    const store = await ensureStore();
-    const record = sessionRecord(store, req);
-    if (!record) return json(res, 401, { ok: false, error: "LOGIN_REQUIRED", message: "请先完成邮箱验证。" });
-    return json(res, 200, { ok: true, ballot: ballotPayload(ballotForSession(store, record.session)) });
+    const result = await mutateStore((store) => {
+      const record = sessionRecord(store, req);
+      if (!record) return null;
+      return {
+        ballot: ballotPayload(ballotForSession(store, record.session)),
+        eligibility: refreshVoteEligibility(store, record.session.email, { deviceId: record.session.deviceId || requestDeviceId(req) })
+      };
+    });
+    if (!result) return json(res, 401, { ok: false, error: "LOGIN_REQUIRED", message: "请先完成邮箱验证。" });
+    return json(res, 200, { ok: true, ...result });
   }
   const body = await readJson(req);
   const operationId = cleanText(body.operationId, 100);
@@ -1283,7 +1468,7 @@ async function handleBallot(req, res) {
       error.code = "LOGIN_REQUIRED";
       throw error;
     }
-    const byPerson = store.ballots.find((ballot) => ballot.personKey === record.session.personKey && ballot.email !== record.session.email);
+    const byPerson = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.personKey === record.session.personKey && ballot.email !== record.session.email);
     if (byPerson) {
       const error = new Error("该姓名与队伍已经使用其他邮箱投票。");
       error.status = 409;
@@ -1294,6 +1479,12 @@ async function handleBallot(req, res) {
     if (usesOperation) {
       const previousOperation = store.ballotOperations[operationId];
       if (previousOperation) {
+        if (previousOperation.eventKey && previousOperation.eventKey !== voteEventKey(store)) {
+          const error = new Error("该选票操作属于另一场活动，请重新操作。");
+          error.status = 409;
+          error.code = "OPERATION_EVENT_CONFLICT";
+          throw error;
+        }
         if (previousOperation.personKey !== record.session.personKey) {
           const error = new Error("选票操作标识已被占用。");
           error.status = 409;
@@ -1364,6 +1555,9 @@ async function handleBallot(req, res) {
       error.code = "SELF_VOTE";
       throw error;
     }
+    const eligibility = gameIds.length
+      ? requireVoteEligibility(store, voterEmail, { deviceId: record.session.deviceId || requestDeviceId(req) })
+      : refreshVoteEligibility(store, voterEmail, { deviceId: record.session.deviceId || requestDeviceId(req) });
     const now = new Date().toISOString();
     if (!ballot) {
       if (!gameIds.length) return { ballot: ballotPayload(null), before, after: [] };
@@ -1378,7 +1572,10 @@ async function handleBallot(req, res) {
         createdAt: now,
         updatedAt: now,
         ip: clientIp(req),
-        userAgent: cleanText(req.headers["user-agent"], 300)
+        userAgent: cleanText(req.headers["user-agent"], 300),
+        deviceId: record.session.deviceId || requestDeviceId(req),
+        eligibilitySource: eligibility.source,
+        eventKey: voteEventKey(store)
       };
       store.ballots.push(ballot);
     } else {
@@ -1386,6 +1583,8 @@ async function handleBallot(req, res) {
       ballot.version = currentVersion + 1;
       ballot.updatedAt = now;
       ballot.ip = clientIp(req);
+      ballot.deviceId = record.session.deviceId || requestDeviceId(req);
+      ballot.eligibilitySource = eligibility.source;
     }
     addAudit(store, {
       action: "ballot_updated",
@@ -1398,6 +1597,7 @@ async function handleBallot(req, res) {
     });
     if (usesOperation) {
       store.ballotOperations[operationId] = {
+        eventKey: voteEventKey(store),
         personKey: record.session.personKey,
         before,
         after: [...gameIds],
@@ -1413,11 +1613,12 @@ async function handleBallot(req, res) {
           .forEach(([id]) => delete store.ballotOperations[id]);
       }
     }
-    return { ballot: ballotPayload(ballot), before, after: [...gameIds], operationId: operationId || null, replayed: false };
+    return { ballot: ballotPayload(ballot), eligibility, before, after: [...gameIds], operationId: operationId || null, replayed: false };
   });
   return json(res, 200, {
     ok: true,
     ballot: result.ballot,
+    eligibility: result.eligibility,
     operationId: result.operationId,
     replayed: result.replayed,
     message: "选票已更新。"
@@ -1463,11 +1664,12 @@ async function handleVote(req, res) {
       const currentMembershipIdentity = membershipIdentity(store, email);
       if (currentMembershipIdentity) synchronizeMembershipIdentity(store, currentMembershipIdentity);
       const record = verifyCode(store, { name: submittedName, team: submittedTeam, email, code });
+      const eligibility = requireVoteEligibility(store, email, { deviceId: requestDeviceId(req) });
       const name = record.resolvedName;
       const team = record.resolvedTeam;
       const key = personKey(name, team);
-      const byEmail = store.ballots.find((ballot) => ballot.email === email);
-      const byPerson = store.ballots.find((ballot) => ballot.personKey === key && ballot.email !== email);
+      const byEmail = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.email === email);
+      const byPerson = store.ballots.find((ballot) => ballot.eventKey === voteEventKey(store) && ballot.personKey === key && ballot.email !== email);
       if (byPerson && !record.usesMembershipIdentity) {
         const error = new Error("该姓名与队伍已经提交过选票。如需修改，请使用首次投票邮箱。" );
         error.status = 409;
@@ -1486,6 +1688,8 @@ async function handleVote(req, res) {
         byEmail.version = Number(byEmail.version || 1) + 1;
         byEmail.updatedAt = nowIso;
         byEmail.ip = clientIp(req);
+        byEmail.deviceId = requestDeviceId(req);
+        byEmail.eligibilitySource = eligibility.source;
       } else {
         store.ballots.push({
           id: randomId(),
@@ -1498,7 +1702,10 @@ async function handleVote(req, res) {
           createdAt: nowIso,
           updatedAt: nowIso,
           ip: clientIp(req),
-          userAgent: cleanText(req.headers["user-agent"], 300)
+          userAgent: cleanText(req.headers["user-agent"], 300),
+          deviceId: requestDeviceId(req),
+          eligibilitySource: eligibility.source,
+          eventKey: voteEventKey(store)
         });
       }
       store.verificationCodes[email] = {
@@ -1516,6 +1723,36 @@ async function handleVote(req, res) {
     error.status ||= 400;
     throw error;
   }
+}
+
+async function handleVoteEligibility(req, res) {
+  if (req.method !== "GET") return methodNotAllowed(res);
+  const result = await mutateStore((store) => {
+    const session = sessionRecord(store, req);
+    if (!session) return null;
+    return refreshVoteEligibility(store, session.session.email, { deviceId: session.session.deviceId || requestDeviceId(req) });
+  });
+  if (!result) return json(res, 401, { ok: false, error: "LOGIN_REQUIRED", message: "登录后，下载记录才会计入投票资格。" });
+  return json(res, 200, { ok: true, eligibility: result });
+}
+
+async function handleVoteActivity(req, res) {
+  if (req.method !== "POST") return methodNotAllowed(res);
+  const body = await readJson(req, 32 * 1024);
+  const type = ["page_return", "game_detail", "game_list"].includes(body.type) ? body.type : "page_return";
+  const gameId = cleanText(body.gameId, 100);
+  const result = await mutateStore((store) => {
+    const session = sessionRecord(store, req);
+    if (!session) return null;
+    const record = eligibilityRecord(store, session.session.email);
+    const now = new Date().toISOString();
+    record.activities.push({ type, gameId, createdAt: now });
+    record.activities = record.activities.slice(-60);
+    record.updatedAt = now;
+    return refreshVoteEligibility(store, session.session.email, { deviceId: session.session.deviceId || requestDeviceId(req) });
+  });
+  if (!result) return json(res, 401, { ok: false, error: "LOGIN_REQUIRED", message: "登录状态已失效。" });
+  return json(res, 200, { ok: true, eligibility: result });
 }
 
 function extensionFor(mime, originalName) {
@@ -2490,7 +2727,7 @@ async function handleParticipantWithdrawGame(req, res, id) {
     game.withdrawnAt = now;
     game.updatedAt = now;
     game.revision = Number(game.revision || 1) + 1;
-    for (const ballot of store.ballots) {
+    for (const ballot of activeBallots(store)) {
       if (!ballot.gameIds.includes(id)) continue;
       const ballotBefore = [...ballot.gameIds];
       ballot.gameIds = ballot.gameIds.filter((gameId) => gameId !== id);
@@ -2998,9 +3235,78 @@ function maskEmail(email) {
   return `${local.slice(0, 2)}${"*".repeat(Math.max(2, Math.min(6, local.length - 2)))}@${domain}`;
 }
 
+function ballotRisk(store, ballot) {
+  const record = eligibilityRecord(store, ballot.email, { create: false });
+  const reasons = [];
+  const downloads = record?.downloads || [];
+  const downloadedIds = new Set(downloads.map((item) => item.gameId));
+  const source = ballot.eligibilitySource || (record?.developerQualifiedAt ? "developer" : record?.downloadQualifiedAt ? "downloads" : record?.legacyQualifiedAt ? "legacy" : "");
+  const isDownloadVoter = source === "downloads";
+  const ballotAt = Date.parse(ballot.createdAt || ballot.updatedAt || 0);
+  const qualifiedAt = Date.parse(record?.downloadQualifiedAt || 0);
+  const firstVerifiedAt = Date.parse(store.emailVerifications?.[normalizeEmail(ballot.email)]?.firstVerifiedAt || 0);
+  if (isDownloadVoter && Number.isFinite(qualifiedAt) && ballotAt - qualifiedAt >= 0 && ballotAt - qualifiedAt <= VOTE_JUST_QUALIFIED_MS
+      && Number.isFinite(firstVerifiedAt) && ballotAt - firstVerifiedAt <= 10 * 60 * 1000) {
+    reasons.push({ code: "NEW_ACCOUNT_MINIMUM_VOTE", label: "新账号刚达最低条件即投票", detail: "首次验证、资格达成和投票发生在很短时间内。", severity: "review" });
+  }
+  const sortedDownloads = downloads.slice().sort((a, b) => Date.parse(a.firstDownloadedAt || 0) - Date.parse(b.firstDownloadedAt || 0));
+  if (isDownloadVoter && sortedDownloads.length >= VOTE_REQUIRED_DOWNLOADS) {
+    const first = Date.parse(sortedDownloads[0].firstDownloadedAt || 0);
+    const threshold = Date.parse(sortedDownloads[VOTE_REQUIRED_DOWNLOADS - 1].firstDownloadedAt || 0);
+    if (Number.isFinite(first) && threshold - first <= VOTE_RAPID_DOWNLOAD_MS) {
+      reasons.push({ code: "RAPID_MINIMUM_DOWNLOADS", label: "短时间完成最低下载数", detail: `${VOTE_REQUIRED_DOWNLOADS} 款不同作品在 ${Math.ceil((threshold - first) / 1000)} 秒内触发下载。`, severity: "review" });
+    }
+  }
+  if (isDownloadVoter && downloads.length === VOTE_REQUIRED_DOWNLOADS) {
+    const first = Date.parse(sortedDownloads[0]?.firstDownloadedAt || 0);
+    const returned = (record?.activities || []).some((activity) => {
+      const at = Date.parse(activity.createdAt || 0);
+      return Number.isFinite(at) && at > first && at < ballotAt;
+    });
+    if (!returned) reasons.push({ code: "MINIMUM_WITHOUT_RETURN", label: "恰好达到最低下载数且无正常返回", detail: "下载后未记录到返回列表或继续浏览作品的行为。", severity: "review" });
+  }
+  if (isDownloadVoter) {
+    const unseenTargets = (ballot.gameIds || []).filter((id) => !downloadedIds.has(id));
+    if (unseenTargets.length) reasons.push({ code: "VOTED_UNDOWNLOADED_GAME", label: "投给未下载的作品", detail: `当前选票中有 ${unseenTargets.length} 款未出现在该账号下载记录中。`, severity: "supporting" });
+  }
+  const voterName = normalizeText(ballot.name).replace(/\s+/g, "");
+  if ((ballot.gameIds || []).some((id) => normalizeCreators(store.games.find((game) => game.id === id)?.creators).some((creator) => normalizeText(creator.name).replace(/\s+/g, "") === voterName))) {
+    reasons.push({ code: "NAME_MATCHES_CREATOR", label: "投票姓名与作者重名", detail: "邮箱自投校验已通过，但姓名与所投作品作者一致。", severity: "supporting" });
+  }
+  const deviceId = ballot.deviceId || record?.deviceIds?.[0] || "";
+  if (deviceId) {
+    const deviceAccounts = Object.values(eligibilityBucket(store).records).filter((item) => (item.deviceIds || []).includes(deviceId));
+    const anchors = deviceAccounts.map((item) => Date.parse(item.createdAt || item.downloads?.[0]?.firstDownloadedAt || 0)).filter(Number.isFinite);
+    const closeSwitch = deviceAccounts.length > 1 && anchors.length > 1 && Math.max(...anchors) - Math.min(...anchors) <= 10 * 60 * 1000;
+    if (closeSwitch) reasons.push({ code: "DEVICE_ACCOUNT_SWITCH", label: "同一设备短时间切换多个邮箱", detail: `该设备关联 ${deviceAccounts.length} 个账号。`, severity: deviceAccounts.length >= 3 ? "high" : "review" });
+  }
+  const primarySource = sortedDownloads.find((item) => item.source)?.source || "";
+  if (primarySource) {
+    const burst = activeBallots(store).filter((other) => {
+      const otherRecord = eligibilityRecord(store, other.email, { create: false });
+      const otherSource = otherRecord?.downloads?.find((item) => item.source)?.source || "";
+      return otherSource === primarySource
+        && (other.gameIds || []).some((id) => (ballot.gameIds || []).includes(id))
+        && Math.abs(Date.parse(other.createdAt || 0) - ballotAt) <= 30 * 60 * 1000;
+    });
+    if (burst.length >= 5) reasons.push({ code: "SOURCE_TARGET_BURST", label: "同一来源集中投向同一作品", detail: `30 分钟内有 ${burst.length} 份同来源选票指向相同作品。`, severity: "review" });
+  }
+  if (reasons.length && ballot.ip) {
+    const sameIp = activeBallots(store).filter((other) => other.ip === ballot.ip && Math.abs(Date.parse(other.createdAt || 0) - ballotAt) <= 30 * 60 * 1000).length;
+    if (sameIp >= 5) reasons.push({ code: "SHARED_IP_SUPPORT", label: "同一网络出口出现集中投票", detail: `30 分钟内同一 IP 出现 ${sameIp} 份选票，仅作为辅助信号。`, severity: "supporting" });
+  }
+  const level = reasons.some((item) => item.severity === "high") || reasons.filter((item) => item.severity !== "supporting").length >= 3
+    ? "high"
+    : reasons.length ? "review" : "normal";
+  return { level, reasons };
+}
+
 async function handleAdminDashboard(req, res, url) {
   if (!requireAdmin(req, url)) return json(res, 401, { ok: false, error: "ADMIN_PASSWORD_REQUIRED", message: "请输入后台密码。" });
-  const store = await ensureStore();
+  const store = await mutateStore((current) => {
+    for (const ballot of activeBallots(current)) refreshVoteEligibility(current, ballot.email, { deviceId: ballot.deviceId });
+    return current;
+  });
   const counts = voteCounts(store);
   const games = store.games
     .slice()
@@ -3010,30 +3316,47 @@ async function handleAdminDashboard(req, res, url) {
   const ballots = activeBallots(store)
     .slice()
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .map((ballot) => ({
-      id: ballot.id,
-      name: ballot.name,
-      team: ballot.team,
-      email: maskEmail(ballot.email),
-      emailSearch: ballot.email,
-      gameIds: ballot.gameIds,
-      games: ballot.gameIds.map((id) => titleById[id]).filter(Boolean),
-      createdAt: ballot.createdAt,
-      updatedAt: ballot.updatedAt,
-      audit: store.audit
-        .filter((item) => item.voterId === ballot.id)
-        .slice(-8)
-        .reverse()
-        .map((item) => ({
-          id: item.id,
-          action: item.action,
-          actorType: item.actorType,
-          before: item.before,
-          after: item.after,
-          reason: item.reason || "",
-          createdAt: item.createdAt
-        }))
-    }));
+    .map((ballot) => {
+      const eligibility = refreshVoteEligibility(store, ballot.email, { deviceId: ballot.deviceId });
+      const record = eligibilityRecord(store, ballot.email, { create: false });
+      return {
+        id: ballot.id,
+        name: ballot.name,
+        team: ballot.team,
+        email: maskEmail(ballot.email),
+        emailSearch: ballot.email,
+        gameIds: ballot.gameIds,
+        games: ballot.gameIds.map((id) => titleById[id]).filter(Boolean),
+        createdAt: ballot.createdAt,
+        updatedAt: ballot.updatedAt,
+        eligibility: {
+          ...eligibility,
+          downloads: (record?.downloads || []).map((item) => ({
+            gameId: item.gameId,
+            title: titleById[item.gameId] || item.gameId,
+            firstDownloadedAt: item.firstDownloadedAt,
+            lastDownloadedAt: item.lastDownloadedAt,
+            count: Number(item.count || 1),
+            source: item.source || ""
+          })),
+          activityCount: (record?.activities || []).length
+        },
+        risk: ballotRisk(store, ballot),
+        audit: store.audit
+          .filter((item) => item.voterId === ballot.id)
+          .slice(-8)
+          .reverse()
+          .map((item) => ({
+            id: item.id,
+            action: item.action,
+            actorType: item.actorType,
+            before: item.before,
+            after: item.after,
+            reason: item.reason || "",
+            createdAt: item.createdAt
+          }))
+      };
+    });
   const preview = resultPreview(store);
   return json(res, 200, {
     ok: true,
@@ -3047,7 +3370,9 @@ async function handleAdminDashboard(req, res, url) {
       games: games.length,
       publishedGames: games.filter((game) => game.published).length,
       voters: ballots.length,
-      votes: ballots.reduce((sum, ballot) => sum + ballot.gameIds.length, 0)
+      votes: ballots.reduce((sum, ballot) => sum + ballot.gameIds.length, 0),
+      reviewBallots: ballots.filter((ballot) => ballot.risk.level !== "normal").length,
+      highRiskBallots: ballots.filter((ballot) => ballot.risk.level === "high").length
     }
   });
 }
@@ -3760,10 +4085,49 @@ async function serveFile(res, requestedPath, options = {}) {
   }
 }
 
-async function handleGameDownload(req, res, id) {
+async function handleGameDownload(req, res, id, url) {
   if (req.method !== "GET") return methodNotAllowed(res);
-  const store = await ensureStore();
-  const game = store.games.find((item) => item.id === id && isGamePublic(item));
+  const game = await mutateStore((store) => {
+    const found = store.games.find((item) => item.id === id && isGamePublic(item));
+    if (!found) return null;
+    const session = sessionRecord(store, req);
+    if (session && isVoteEligibleGame(found)) {
+      const email = normalizeEmail(session.session.email);
+      const record = eligibilityRecord(store, email);
+      const now = new Date().toISOString();
+      const deviceId = session.session.deviceId || requestDeviceId(req);
+      const source = cleanText(url?.searchParams.get("source") || url?.searchParams.get("ref"), 120);
+      const existing = record.downloads.find((item) => item.gameId === found.id);
+      if (existing) {
+        existing.lastDownloadedAt = now;
+        existing.count = Number(existing.count || 1) + 1;
+        if (source && !existing.source) existing.source = source;
+      } else {
+        record.downloads.push({
+          gameId: found.id,
+          firstDownloadedAt: now,
+          lastDownloadedAt: now,
+          count: 1,
+          deviceId,
+          ip: clientIp(req),
+          source,
+          referrer: cleanText(req.headers.referer, 300)
+        });
+        addAudit(store, {
+          action: "vote_qualifying_download_recorded",
+          actorType: "voter",
+          actorId: session.session.id,
+          voterEmail: email,
+          gameId: found.id,
+          source
+        });
+      }
+      if (deviceId && !record.deviceIds.includes(deviceId)) record.deviceIds.push(deviceId);
+      record.updatedAt = now;
+      refreshVoteEligibility(store, email, { deviceId });
+    }
+    return found;
+  });
   if (!game?.downloadUrl) return notFound(res);
   if (!String(game.downloadUrl).startsWith("/uploads/")) {
     res.writeHead(302, { location: game.downloadUrl, "cache-control": "no-store" });
@@ -3824,7 +4188,7 @@ async function router(req, res) {
       return json(res, 200, publicSite(await ensureStore()));
     }
     const publicDownloadMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/download$/);
-    if (publicDownloadMatch) return await handleGameDownload(req, res, decodeURIComponent(publicDownloadMatch[1]));
+    if (publicDownloadMatch) return await handleGameDownload(req, res, decodeURIComponent(publicDownloadMatch[1]), url);
     if (url.pathname === "/api/verification/request") {
       if (req.method !== "POST") return methodNotAllowed(res);
       return await handleRequestCode(req, res);
@@ -3837,6 +4201,8 @@ async function router(req, res) {
       if (req.method !== "GET" && req.method !== "DELETE") return methodNotAllowed(res);
       return await handlePublicSession(req, res);
     }
+    if (url.pathname === "/api/vote-eligibility") return await handleVoteEligibility(req, res);
+    if (url.pathname === "/api/vote-activity") return await handleVoteActivity(req, res);
     if (url.pathname === "/api/ballot") {
       if (req.method !== "GET" && req.method !== "PUT") return methodNotAllowed(res);
       return await handleBallot(req, res);

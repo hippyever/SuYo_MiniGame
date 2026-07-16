@@ -11,7 +11,7 @@
     <meta property="og:image" content="/assets/suyo-studio.png" />
     <title>溯造 MiniGame 游戏开发大赛</title>
     <link rel="icon" href="/assets/suyo-studio.png" type="image/png" />
-    <link rel="stylesheet" href="/observatory.css?v=20260716echo1" />
+    <link rel="stylesheet" href="/observatory.css?v=20260716vote1" />
   </head>
   <body class="observatory-body">
     <a class="skip-link" href="#observerToolbar">跳到观测工具</a>
@@ -331,7 +331,7 @@
           <div><span>投票身份</span><h2 id="authTitle">登录投票身份</h2></div>
           <button class="plain-action" id="closeAuth" type="button">关闭</button>
         </header>
-        <p class="dialog-intro" id="authIntro">浏览无需登录。验证一次后，即可在投票截止前随时修改选票。</p>
+        <p class="dialog-intro" id="authIntro">浏览和下载无需登录。开发者可直接投票，其他玩家登录后下载 3 款参赛作品，并从首次下载起等待 30 分钟即可投票。</p>
         <div class="identity-grid">
           <label class="field-block"><span>姓名</span><input id="authName" name="name" maxlength="30" autocomplete="name" required /></label>
           <label class="field-block"><span>队伍</span><input id="authTeam" name="team" maxlength="50" autocomplete="organization" required /></label>
@@ -352,6 +352,10 @@
           <button class="plain-action" id="closeBallot" type="button">关闭</button>
         </header>
         <div class="ballot-identity" id="ballotIdentity"></div>
+        <section class="vote-eligibility" id="voteEligibilityPanel" aria-live="polite">
+          <strong>正在核对投票资格</strong>
+          <p>登录后下载参赛作品，记录会同步到这里。</p>
+        </section>
         <div class="ballot-orbits" id="ballotOrbits"></div>
         <div class="unexplored-note" id="unexploredNote"></div>
         <section class="ballot-conflict" id="ballotConflict" hidden aria-live="polite">
@@ -406,6 +410,7 @@
         <p id="ceremonyEyebrow">可能性核心提取</p>
         <h2 id="ceremonyTitle">稳定作品信号</h2>
         <p id="ceremonyStatus">持续按住三秒，从作品行星中提取可能性核心。</p>
+        <section class="ceremony-eligibility" id="ceremonyEligibility" aria-live="polite" hidden></section>
         <div class="ceremony-steps" id="ceremonySteps" aria-label="投票仪式步骤">
           <span data-ritual-step="extract" aria-current="step">长按提取</span><i aria-hidden="true">→</i><span data-ritual-step="orbit">点击入轨</span>
         </div>
@@ -445,6 +450,6 @@
     <div class="vote-ritual" id="voteRitual" hidden aria-hidden="true"><i></i><span></span></div>
     <video id="planetPreview" muted loop playsinline preload="none" hidden></video>
     <script src="/markdown.js?v=20260715a" defer></script>
-    <script src="/app.js?v=20260716echo1" defer></script>
+    <script src="/app.js?v=20260716vote1" defer></script>
   </body>
 </html>
